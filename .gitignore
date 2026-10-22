@@ -1,0 +1,38 @@
+# OS files
+.DS_Store
+Thumbs.db
+
+# Environment variables
+.env
+.env.local
+.env.*.local
+*.local
+
+# Node / Frontend
+node_modules/
+.next/
+out/
+build/
+dist/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.pnpm-debug.log*
+
+# Ruby / Rails
+backend/tmp/
+backend/log/
+backend/storage/
+backend/db/*.sqlite3
+backend/db/*.sqlite3-*
+backend/.bundle/
+backend/vendor/bundle/
+backend/public/assets/
+.byebug_history
+*.gem
+
+# IDE & Editors
+.vscode/
+.idea/
+*.swp
+*.swo
