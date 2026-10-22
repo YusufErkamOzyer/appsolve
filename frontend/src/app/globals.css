@@ -1,0 +1,65 @@
+@import "tailwindcss";
+
+:root {
+  /* APPSOLVE.OS1 Color System Tokens */
+  --os-ink: #522D60;
+  --os-mulberry: #80426E;
+  --os-apricot: #F2A67B;
+  --os-amber: #FFD38B;
+  --os-paper: #FFFFFF;
+  --os-desk: #FAF6F2;
+  --os-crimson: #D9383A;
+  --os-phosphor: #1E8E5A;
+
+  --background: var(--os-desk);
+  --foreground: var(--os-ink);
+}
+
+@theme inline {
+  --color-os-ink: var(--os-ink);
+  --color-os-mulberry: var(--os-mulberry);
+  --color-os-apricot: var(--os-apricot);
+  --color-os-amber: var(--os-amber);
+  --color-os-paper: var(--os-paper);
+  --color-os-desk: var(--os-desk);
+  --color-os-crimson: var(--os-crimson);
+  --color-os-phosphor: var(--os-phosphor);
+
+  --font-mono: var(--font-plex-mono), monospace;
+  --font-sans: var(--font-space-grotesk), sans-serif;
+}
+
+body {
+  background-color: var(--os-desk);
+  color: var(--os-ink);
+  font-family: var(--font-space-grotesk), sans-serif;
+  min-height: 100vh;
+}
+
+/* Structural Workstation Elements */
+.os-desk-grid {
+  background-color: #FAF6F2;
+  background-image: radial-gradient(rgba(82, 45, 96, 0.12) 1px, transparent 1px);
+  background-size: 16px 16px;
+}
+
+.os-window-shadow {
+  box-shadow: 4px 4px 0px #522D60;
+}
+
+.os-btn-shadow {
+  box-shadow: 2px 2px 0px #522D60;
+}
+
+.os-btn-shadow-sm {
+  box-shadow: 1.5px 1.5px 0px #522D60;
+}
+
+.os-active-press:active {
+  transform: translate(2px, 2px);
+  box-shadow: 0px 0px 0px #522D60;
+}
+
+.tabular-nums {
+  font-variant-numeric: tabular-nums;
+}
