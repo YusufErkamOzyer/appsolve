@@ -99,5 +99,10 @@ class WarRoomOrchestratorTest < ActiveSupport::TestCase
     assert_equal "operational", @checkout.reload.status
     events = @incident.incident_events.pluck(:event_type)
     assert_includes events, "incident_resolved"
+
+    # Module 6: Otomatik Post-Mortem doğrulama
+    assert_not_nil @incident.post_mortem
+    assert_not_empty @incident.post_mortem.summary
+    assert_not_empty @incident.post_mortem.root_cause
   end
 end

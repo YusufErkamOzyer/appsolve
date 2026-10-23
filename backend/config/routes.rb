@@ -9,6 +9,8 @@ Rails.application.routes.draw do
           post :approve_plan
           post :reject_plan
           post :messages, to: "incidents#create_message"
+          post "post_mortem/regenerate", to: "incidents#regenerate_post_mortem"
+          get "post_mortem/export", to: "incidents#export_post_mortem"
         end
       end
 

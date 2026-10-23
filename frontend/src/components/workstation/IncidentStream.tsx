@@ -4,6 +4,7 @@ import React, { useState, useRef, useEffect } from "react";
 import { Incident, sendWarRoomMessage } from "@/lib/api";
 import { SlaCountdown } from "./SlaCountdown";
 import { ActionCard } from "./ActionCard";
+import { PostMortemViewer } from "./PostMortemViewer";
 
 interface IncidentStreamProps {
   incident: Incident | null;
@@ -38,8 +39,19 @@ export function IncidentStream({
   const [commandInput, setCommandInput] = useState<string>("");
   const [isSending, setIsSending] = useState<boolean>(false);
   const [sendError, setSendError] = useState<string | null>(null);
+  const [activeViewTab, setActiveViewTab] = useState<"stream" | "post_mortem">("stream");
   const streamEndRef = useRef<HTMLDivElement | null>(null);
   const inputRef = useRef<HTMLInputElement | null>(null);
+
+  // Auto-switch to post-mortem tab or stream based on incident resolution
+  const prevIncidentIdRef = useRef<number | null>(null);
+  useEffect(() => {
+    if (incident?.id !== prevIncidentIdRef.current) {
+      prevIncidentIdRef.current = incident?.id || null;
+      // Default to stream view on new selection
+      setActiveViewTab("stream");
+    }
+  }, [incident?.id]);
 
   // Auto-scroll to bottom of stream when messages update
   useEffect(() => {
@@ -175,8 +187,54 @@ export function IncidentStream({
         </div>
       </div>
 
-      {/* 2. Chronological Vertical Stream Body */}
-      <div className="flex-1 overflow-y-auto p-4 sm:p-5 space-y-5">
+      {/* Dual Mode Switcher Bar when Resolved */}
+      {isResolved && (
+        <div className="h-8 px-3 border-b-[1.5px] border-[#522D60] bg-[#FAF6F2] flex items-center justify-between font-mono text-[10px] shrink-0">
+          <div className="flex items-center gap-1.5">
+            <button
+              type="button"
+              onClick={() => setActiveViewTab("stream")}
+              className={`px-2.5 py-0.5 border cursor-pointer font-bold transition-none ${
+                activeViewTab === "stream"
+                  ? "bg-[#522D60] text-[#FFFFFF] border-[#522D60]"
+                  : "bg-[#FFFFFF] text-[#522D60] border-[#522D60]/30 hover:bg-[#FAF6F2]"
+              }`}
+            >
+              💬 WAR ROOM AKIŞI
+            </button>
+            <button
+              type="button"
+              onClick={() => setActiveViewTab("post_mortem")}
+              className={`px-2.5 py-0.5 border cursor-pointer font-bold transition-none flex items-center gap-1.5 ${
+                activeViewTab === "post_mortem"
+                  ? "bg-[#1E8E5A] text-[#FFFFFF] border-[#1E8E5A]"
+                  : "bg-[#FFFFFF] text-[#522D60] border-[#522D60]/30 hover:bg-[#FAF6F2]"
+              }`}
+            >
+              <span>📄 POST-MORTEM RAPORU 1.1</span>
+              <span className="w-1.5 h-1.5 rounded-full bg-[#1E8E5A]" />
+            </button>
+          </div>
+
+          <div className="flex items-center gap-2 text-[#80426E]">
+            <span className="font-bold">MTTR: {mttrFormatted || "< 10 sn"}</span>
+            <span className="text-[#522D60]/30">•</span>
+            <span>{incident.post_mortem ? "Rapor Hazır ✓" : "Rapor Bekleniyor"}</span>
+          </div>
+        </div>
+      )}
+
+      {activeViewTab === "post_mortem" && isResolved ? (
+        <div className="flex-1 overflow-y-auto">
+          <PostMortemViewer
+            incident={incident}
+            onPostMortemUpdated={onIncidentUpdated}
+          />
+        </div>
+      ) : (
+        <>
+          {/* 2. Chronological Vertical Stream Body */}
+          <div className="flex-1 overflow-y-auto p-4 sm:p-5 space-y-5">
         <div className="relative pl-6 sm:pl-8 space-y-6 before:content-[''] before:absolute before:left-2 before:top-2 before:bottom-2 before:w-[2px] before:bg-[#522D60]/20">
           {/* Card 1: RAW TELEMETRY (Soft Pink/Red Tint) */}
           <div className="relative space-y-1.5">
@@ -493,6 +551,29 @@ export function IncidentStream({
             </div>
           )}
 
+          {/* Embedded Post-Mortem Document in Stream View */}
+          {isResolved && (
+            <div className="relative space-y-2 pt-2">
+              <div className="flex items-center gap-2 font-mono text-[10px] -ml-6 sm:-ml-8">
+                <span className="w-4 h-4 rounded-full bg-[#FFFFFF] border-2 border-[#522D60] flex items-center justify-center shrink-0 z-10">
+                  <span className="w-1.5 h-1.5 bg-[#522D60] rounded-full" />
+                </span>
+                <span className="font-bold text-[#80426E] tabular-nums">
+                  {incident.resolved_at ? new Date(incident.resolved_at).toLocaleTimeString() : timeStr}
+                </span>
+                <span className="px-1.5 py-0.2 bg-[#522D60] text-[#FFFFFF] font-bold tracking-wider">
+                  OTOMATİK POST-MORTEM (POSTMORTEM 1.1)
+                </span>
+              </div>
+
+              <PostMortemViewer
+                incident={incident}
+                onPostMortemUpdated={onIncidentUpdated}
+                compact
+              />
+            </div>
+          )}
+
           {/* Anchor for auto-scroll */}
           <div ref={streamEndRef} />
         </div>
@@ -567,6 +648,8 @@ export function IncidentStream({
           </button>
         </form>
       </div>
-    </section>
+    </>
+  )}
+</section>
   );
 }

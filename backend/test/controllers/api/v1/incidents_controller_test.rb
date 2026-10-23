@@ -181,4 +181,35 @@ class Api::V1::IncidentsControllerTest < ActionDispatch::IntegrationTest
     post messages_api_v1_incident_url(id: 999999), params: { content: "test" }, as: :json
     assert_response :not_found
   end
+
+  test "POST /api/v1/incidents/:id/post_mortem/regenerate returns 422 for unresolved incident" do
+    post "/api/v1/incidents/#{@incident.id}/post_mortem/regenerate", as: :json
+    assert_response :unprocessable_entity
+    json = JSON.parse(response.body)
+    assert_includes json["error"], "çözülmüş olaylar"
+  end
+
+  test "POST /api/v1/incidents/:id/post_mortem/regenerate succeeds for resolved incident" do
+    @incident.update!(status: "resolved", resolved_at: Time.current)
+
+    post "/api/v1/incidents/#{@incident.id}/post_mortem/regenerate", as: :json
+    assert_response :success
+    json = JSON.parse(response.body)
+    assert_equal "ok", json["status"]
+    assert_not_nil json["post_mortem"]
+    assert_not_empty json["post_mortem"]["summary"]
+    assert_not_empty json["post_mortem"]["root_cause"]
+  end
+
+  test "GET /api/v1/incidents/:id/post_mortem/export downloads markdown file" do
+    @incident.update!(status: "resolved", resolved_at: Time.current)
+    AiSre::PostMortemGenerator.generate!(@incident)
+
+    get "/api/v1/incidents/#{@incident.id}/post_mortem/export"
+    assert_response :success
+    assert_includes response.headers["Content-Disposition"], "attachment"
+    assert_includes response.headers["Content-Disposition"], ".md"
+    assert_includes response.body, "POST-MORTEM RAPORU"
+    assert_includes response.body, @incident.incident_code
+  end
 end

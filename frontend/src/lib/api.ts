@@ -81,6 +81,7 @@ export interface PostMortem {
   affected_services: string[];
   action_items: string[];
   generated_by: string;
+  created_at?: string;
 }
 
 export interface Incident {
@@ -106,6 +107,7 @@ export interface Incident {
   };
   events: IncidentEvent[];
   messages?: WarRoomMessage[];
+  post_mortem?: PostMortem | null;
 }
 
 export interface IncidentDetail extends Incident {
@@ -258,4 +260,28 @@ export async function rejectIncidentPlan(
     throw new Error(data.error || `Plan reddedilemedi: ${res.statusText}`);
   }
   return data;
+}
+
+export interface RegeneratePostMortemResponse {
+  status: string;
+  message: string;
+  post_mortem: PostMortem;
+  incident: IncidentDetail;
+}
+
+export async function regeneratePostMortem(incidentId: number): Promise<RegeneratePostMortemResponse> {
+  const res = await fetch(`${API_BASE}/incidents/${incidentId}/post_mortem/regenerate`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" }
+  });
+
+  const data = await res.json();
+  if (!res.ok) {
+    throw new Error(data.error || `Post-Mortem yeniden oluşturulamadı: ${res.statusText}`);
+  }
+  return data;
+}
+
+export function getPostMortemExportUrl(incidentId: number): string {
+  return `${API_BASE}/incidents/${incidentId}/post_mortem/export`;
 }

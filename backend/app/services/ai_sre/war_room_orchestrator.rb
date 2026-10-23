@@ -68,6 +68,9 @@ module AiSre
 
       @incident.update!(status: "resolved", resolved_at: Time.current)
       @service.recalculate_status! if @service.present?
+
+      # Otomatik Post-Mortem Raporu Üretimi (PostMortem 1.1)
+      AiSre::PostMortemGenerator.generate!(@incident)
     end
 
     def handle_plan_creation(res)
