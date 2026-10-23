@@ -10,7 +10,9 @@ interface OsBadgeProps {
     | "outage"
     | "ink"
     | "mulberry"
+    | "apricot"
     | "amber"
+    | "crimson"
     | "paper";
   pulse?: boolean;
   children: React.ReactNode;
@@ -32,7 +34,9 @@ export function OsBadge({
     outage: "bg-[#D9383A] text-[#FFFFFF] border-[#522D60]",
     ink: "bg-[#522D60] text-[#FFFFFF] border-[#522D60]",
     mulberry: "bg-[#80426E] text-[#FFFFFF] border-[#522D60]",
+    apricot: "bg-[#F2A67B] text-[#522D60] border-[#522D60] font-bold",
     amber: "bg-[#FFD38B] text-[#522D60] border-[#522D60]",
+    crimson: "bg-[#D9383A] text-[#FFFFFF] border-[#522D60]",
     paper: "bg-[#FFFFFF] text-[#522D60] border-[#522D60]",
   }[variant];
 

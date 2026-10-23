@@ -13,7 +13,7 @@ module Api
           incident = Incident.create!(
             service: service,
             title: "#{error_code}: #{message.truncate(80)}",
-            severity: params[:severity], # Optional, Step 2 Gemini AI Triage will auto-determine
+            severity: params[:severity],
             status: "investigating",
             autonomy_mode: "pending_triage",
             raw_payload: raw_payload
@@ -22,7 +22,7 @@ module Api
           # Update service last incident timestamp
           service.update!(last_incident_at: Time.current)
 
-          event = incident.incident_events.create!(
+          incident.incident_events.create!(
             event_type: "signal_received",
             actor: "system",
             title: "QuickCart ham telemetri sinyali yakalandı",
@@ -30,25 +30,38 @@ module Api
             occurred_at: Time.current
           )
 
+          # AI SRE Triage & Guardrail Motorunu çalıştır
+          AiSre::TriageService.call(incident)
+
           render json: {
             status: "accepted",
-            message: "Telemetri sinyali başarıyla kaydedildi.",
+            message: "Telemetri sinyali başarıyla işlendi ve AI Triage tamamlandı.",
             incident: {
               id: incident.id,
               incident_code: incident.incident_code,
               service_slug: service.slug,
               service_name: service.name,
+              service_status: service.reload.status,
               title: incident.title,
               severity: incident.severity,
               status: incident.status,
+              autonomy_mode: incident.autonomy_mode,
+              escalation_target: incident.escalation_target,
+              sla_deadline: incident.sla_deadline&.iso8601,
+              reasoning: incident.reasoning,
+              hypothesis: incident.hypothesis,
+              recommended_action_plan: incident.recommended_action_plan,
               created_at: incident.created_at.iso8601,
-              timeline_event: {
-                id: event.id,
-                event_type: event.event_type,
-                title: event.title,
-                details: event.details,
-                occurred_at: event.occurred_at.iso8601
-              }
+              events: incident.incident_events.order(occurred_at: :asc).map do |ev|
+                {
+                  id: ev.id,
+                  event_type: ev.event_type,
+                  actor: ev.actor,
+                  title: ev.title,
+                  details: ev.details,
+                  occurred_at: ev.occurred_at.iso8601
+                }
+              end
             }
           }, status: :created
         rescue ActiveRecord::RecordInvalid => e

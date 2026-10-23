@@ -37,6 +37,13 @@ export interface Incident {
   escalation_target: string;
   hypothesis: string | null;
   reasoning: string | null;
+  recommended_action_plan?: {
+    plan_id?: string;
+    title?: string;
+    tool_name?: string;
+    risk_level?: string;
+    steps?: string[];
+  } | null;
   sla_deadline: string | null;
   resolved_at: string | null;
   created_at: string;

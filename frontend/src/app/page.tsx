@@ -50,6 +50,9 @@ export default function CommandWorkstationPage() {
   const [errorMessage, setErrorMessage] = useState<string>(
     "Checkout payment transaction timed out waiting for row lock."
   );
+  const [currentMetrics, setCurrentMetrics] = useState<Record<string, unknown>>(
+    PRESET_SIGNALS[0].metrics
+  );
   const [injecting, setInjecting] = useState<boolean>(false);
   const [injectFeedback, setInjectFeedback] = useState<string | null>(null);
 
@@ -76,6 +79,7 @@ export default function CommandWorkstationPage() {
     setSelectedService(preset.service_slug);
     setErrorCode(preset.error_code);
     setErrorMessage(preset.message);
+    setCurrentMetrics(preset.metrics);
   };
 
   const handleSendSignal = async (e: React.FormEvent) => {
@@ -87,12 +91,13 @@ export default function CommandWorkstationPage() {
         service_slug: selectedService,
         error_code: errorCode,
         message: errorMessage,
+        metrics: currentMetrics,
         metadata: {
           injected_from: "APPSOLVE.OS1 Command Workstation",
           client: "QuickCart iOS v3.4.1",
         },
       });
-      setInjectFeedback(`Sinyal başarıyla iletildi (${errorCode})!`);
+      setInjectFeedback(`Sinyal başarıyla iletildi (${errorCode})! AI Triage tamamlandı.`);
       await loadData();
     } catch (err) {
       setInjectFeedback(
@@ -253,7 +258,7 @@ export default function CommandWorkstationPage() {
                           </span>
                         </div>
 
-                        <div className="flex items-center gap-1.5">
+                        <div className="flex flex-wrap items-center gap-1.5">
                           {inc.severity ? (
                             <OsBadge
                               variant={
@@ -269,6 +274,33 @@ export default function CommandWorkstationPage() {
                           ) : (
                             <OsBadge variant="amber">ANALİZ BEKLİYOR</OsBadge>
                           )}
+
+                          {inc.autonomy_mode && (
+                            <OsBadge
+                              variant={
+                                inc.autonomy_mode === "manual_command_only"
+                                  ? "crimson"
+                                  : inc.autonomy_mode === "approval_required"
+                                  ? "apricot"
+                                  : "amber"
+                              }
+                            >
+                              {inc.autonomy_mode === "manual_command_only"
+                                ? "MANUEL KİLİT"
+                                : inc.autonomy_mode === "approval_required"
+                                ? "ONAY ŞARTI"
+                                : "TAM OTONOMİ"}
+                            </OsBadge>
+                          )}
+
+                          {inc.escalation_target && inc.escalation_target !== "none" && (
+                            <OsBadge variant="mulberry">
+                              {inc.escalation_target === "on_call_and_team_lead"
+                                ? "ON-CALL + LEAD"
+                                : "ON-CALL"}
+                            </OsBadge>
+                          )}
+
                           <OsBadge variant="paper">{inc.status.toUpperCase()}</OsBadge>
                         </div>
                       </div>
@@ -276,6 +308,37 @@ export default function CommandWorkstationPage() {
                       <div className="font-mono text-[12px] font-semibold text-[#522D60]">
                         {inc.title}
                       </div>
+
+                      {/* AI Triage & Reasoning Box */}
+                      {(inc.reasoning || inc.hypothesis) && (
+                        <div className="border border-[#522D60]/30 bg-[#FFFFFF] p-2 space-y-1 font-mono text-[11px]">
+                          {inc.reasoning && (
+                            <div>
+                              <span className="font-bold text-[#80426E]">İŞ ETKİSİ: </span>
+                              <span className="text-[#522D60]">{inc.reasoning}</span>
+                            </div>
+                          )}
+                          {inc.hypothesis && (
+                            <div>
+                              <span className="font-bold text-[#522D60]">KÖK NEDEN: </span>
+                              <span className="text-[#522D60]/90">{inc.hypothesis}</span>
+                            </div>
+                          )}
+                          {inc.recommended_action_plan?.title && (
+                            <div className="pt-1 border-t border-dashed border-[#522D60]/30 text-[10px] text-[#80426E] flex flex-wrap items-center justify-between gap-1">
+                              <span>
+                                ÖNERİLEN EYLEM:{" "}
+                                <strong className="text-[#522D60]">
+                                  {inc.recommended_action_plan.title}
+                                </strong>
+                              </span>
+                              <span className="px-1 bg-[#FAF6F2] border border-[#522D60] font-bold text-[#522D60]">
+                                {inc.recommended_action_plan.tool_name}
+                              </span>
+                            </div>
+                          )}
+                        </div>
+                      )}
 
                       {/* Events Log */}
                       {inc.events && inc.events.length > 0 && (

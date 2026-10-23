@@ -21,6 +21,18 @@ class Incident < ApplicationRecord
   scope :active, -> { where.not(status: "resolved").order(created_at: :desc) }
   scope :resolved, -> { where(status: "resolved").order(resolved_at: :desc) }
 
+  def can_execute_autonomously?
+    autonomy_mode == "full_autonomy" && severity == "SEV-3"
+  end
+
+  def requires_human_approval?
+    autonomy_mode == "approval_required"
+  end
+
+  def locked_to_manual_commands?
+    autonomy_mode == "manual_command_only"
+  end
+
   private
 
   def generate_incident_code

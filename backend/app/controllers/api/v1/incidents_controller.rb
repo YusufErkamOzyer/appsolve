@@ -31,6 +31,7 @@ module Api
           escalation_target: inc.escalation_target,
           hypothesis: inc.hypothesis,
           reasoning: inc.reasoning,
+          recommended_action_plan: inc.recommended_action_plan,
           sla_deadline: inc.sla_deadline&.iso8601,
           resolved_at: inc.resolved_at&.iso8601,
           created_at: inc.created_at.iso8601,
