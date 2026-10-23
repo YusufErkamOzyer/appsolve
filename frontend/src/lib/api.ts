@@ -115,11 +115,60 @@ export interface IncidentDetail extends Incident {
   post_mortem: PostMortem | null;
 }
 
+export interface StatusUpdateItem {
+  id: number;
+  incident_id: number;
+  incident_code?: string;
+  severity?: IncidentSeverity | null;
+  service_id: number;
+  service_name?: string;
+  service_slug?: string;
+  phase: "investigating" | "identified" | "monitoring" | "resolved" | "autonomous_resolved" | string;
+  phase_label: string;
+  public_message: string;
+  visible_on_status_page: boolean;
+  occurred_at: string;
+  time_formatted: string;
+}
+
+export interface PublicIncidentSummary {
+  id: number;
+  incident_code: string;
+  service_name: string;
+  service_slug: string;
+  severity: IncidentSeverity | null;
+  status: IncidentStatus;
+  title: string;
+  created_at: string;
+  resolved_at: string | null;
+  updates: StatusUpdateItem[];
+}
+
 export interface ServicesResponse {
   system_status: "all_operational" | "partial_outage" | "major_outage";
   system_status_label: string;
+  system_status_description?: string;
   last_synced_at: string;
   services: Service[];
+  status_updates?: StatusUpdateItem[];
+}
+
+export interface StatusPageResponse {
+  system_status: "all_operational" | "partial_outage" | "major_outage";
+  system_status_label: string;
+  system_status_description: string;
+  last_synced_at: string;
+  meta: {
+    app_name: string;
+    version: string;
+    poll_interval_seconds: number;
+    mobile_client_support: boolean;
+    telemetry_endpoint: string;
+  };
+  services: Service[];
+  status_updates: StatusUpdateItem[];
+  active_incidents: PublicIncidentSummary[];
+  recent_incidents: PublicIncidentSummary[];
 }
 
 export interface IncidentsResponse {
@@ -146,6 +195,17 @@ export async function fetchServices(): Promise<ServicesResponse> {
   });
   if (!res.ok) {
     throw new Error(`Failed to fetch services: ${res.statusText}`);
+  }
+  return res.json();
+}
+
+export async function fetchStatusPage(): Promise<StatusPageResponse> {
+  const res = await fetch(`${API_BASE}/status_page`, {
+    cache: "no-store",
+    headers: { "Content-Type": "application/json" }
+  });
+  if (!res.ok) {
+    throw new Error(`Failed to fetch status page: ${res.statusText}`);
   }
   return res.json();
 }

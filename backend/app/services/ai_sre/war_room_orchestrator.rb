@@ -69,6 +69,9 @@ module AiSre
       @incident.update!(status: "resolved", resolved_at: Time.current)
       @service.recalculate_status! if @service.present?
 
+      # Müşteri Durum Sayfası ve Mobil Bildirimi (Çözüldü)
+      AiSre::CustomerCommunicationService.publish_resolved!(@incident)
+
       # Otomatik Post-Mortem Raporu Üretimi (PostMortem 1.1)
       AiSre::PostMortemGenerator.generate!(@incident)
     end

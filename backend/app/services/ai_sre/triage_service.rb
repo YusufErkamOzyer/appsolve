@@ -32,6 +32,9 @@ module AiSre
       # Otonomi Kilidi ve Akıllı Eskalasyon kurallarını işlet
       AiSre::GuardrailEngine.apply_guardrails!(@incident)
 
+      # Müşteri Durum Sayfası ve Mobil Bildirimi (İnceleniyor)
+      AiSre::CustomerCommunicationService.publish_investigating!(@incident, gemini_client: @gemini_client)
+
       # Adım 3: Üçlü Çözüm Yolu (Yol A otonom çözüm, Yol B eylem kartı, Yol C War Room hazırlığı)
       AiSre::RemediationService.route_after_triage!(@incident) if @auto_route
 

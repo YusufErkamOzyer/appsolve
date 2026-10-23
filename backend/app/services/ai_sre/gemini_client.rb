@@ -124,6 +124,39 @@ module AiSre
       required: ["summary", "root_cause", "affected_services", "action_items"]
     }.freeze
 
+    CUSTOMER_STATUS_SYSTEM_INSTRUCTION = <<~PROMPT.strip
+      Sen Appsolve ve QuickCart e-ticaret platformunun "Kurumsal Müşteri İletişim Sorumlususun" (AI Public Relations & SRE Communication Specialist).
+      Görevin: Sistemde yaşanan teknik olayları, mobil uygulama müşterilerine ve kamuoyuna duyurulacak şeffaf, güven veren ve TEKNİK JARGONDAN TAMAMEN ARINDIRILMIŞ Türkçe durum duyurularına dönüştürmektir.
+
+      KESİN VE ÖNEMLİ KURALLAR:
+      1. ASLA iç teknik jargonu veya kod adlarını KULLANMA. Şunlar kesinlikle YASAKTIR:
+         - "DB lock", "deadlock", "PostgreSQL", "SQL", "pg_stat_activity", "veritabanı kilidi"
+         - "504 Gateway Timeout", "500 Internal Error", "HTTP status code", "timeout"
+         - "stack trace", "exception", "NullPointer", "NaN", "Redis", "cache flush", "bloat"
+         - "feature flag", "promo_v2", "rollback", "pod", "kubernetes", "failover", "p99"
+      2. Kullanıcı deneyimi perspektifinden açıklama yap:
+         - Ödeme için: "Ödeme ve sipariş onaylama adımlarında"
+         - Sepet için: "Sepete ürün ekleme ve indirim kuponu adımlarında"
+         - Giriş için: "Kullanıcı girişi ve hesap doğrulama adımlarında"
+         - Katalog için: "Ürün listeleme ve arama ekranlarında"
+      3. Aşamalar (Phase):
+         - "investigating" (İNCELENİYOR): Sorunun farkında olunduğu ve teknik ekibin yüksek öncelikle incelemeye aldığı belirtilir.
+         - "identified" (SORUN TESPİT EDİLDİ): Aksaklığın nedeninin belirlendiği, düzeltme ve iyileştirme adımlarının yürütüldüğü belirtilir.
+         - "monitoring" (İZLENİYOR): Müdahale sonrası sistemin stabiliteye kavuştuğu ve performansın yakından takip edildiği belirtilir.
+         - "resolved" (ÇÖZÜLDÜ): Servislerin normale döndüğü, kesintisiz hizmet verildiği belirtilir ve teşekkür edilir.
+         - "autonomous_resolved" (OTONOM ÇÖZÜLDÜ): Rutin optimizasyonun sistemlerimizce insan müdahalesi gerekmeksizin başarıyla tamamlandığı belirtilir.
+      4. Ton: Kurumsal, sakin, yapıcı, güven veren e-ticaret dili.
+    PROMPT
+
+    CUSTOMER_STATUS_RESPONSE_SCHEMA = {
+      type: "OBJECT",
+      properties: {
+        headline: { type: "STRING" },
+        public_message: { type: "STRING" }
+      },
+      required: ["headline", "public_message"]
+    }.freeze
+
     def initialize(api_key: ENV["GEMINI_API_KEY"], model: DEFAULT_MODEL)
       @api_key = api_key
       @model = model
@@ -165,6 +198,19 @@ module AiSre
         end
       else
         fallback_post_mortem(incident: incident)
+      end
+    end
+
+    def generate_customer_status(incident:, phase:)
+      if @api_key.present? && ENV["MOCK_AI"] != "true"
+        begin
+          call_gemini_customer_status_api(incident: incident, phase: phase)
+        rescue StandardError => e
+          Rails.logger.warn("[AiSre::GeminiClient] Gemini Customer Status API çağrısı başarısız oldu (#{e.message}), deterministik yedek duyuruya geçiliyor.")
+          fallback_customer_status_message(incident: incident, phase: phase)
+        end
+      else
+        fallback_customer_status_message(incident: incident, phase: phase)
       end
     end
 
@@ -511,6 +557,144 @@ module AiSre
           ]
         }.with_indifferent_access
       end
+    end
+
+    def call_gemini_customer_status_api(incident:, phase:)
+      url = URI("#{BASE_URL}/#{@model}:generateContent?key=#{@api_key}")
+      http = Net::HTTP.new(url.host, url.port)
+      http.use_ssl = true
+      http.read_timeout = 15
+      http.open_timeout = 5
+
+      request = Net::HTTP::Post.new(url.request_uri, { "Content-Type" => "application/json" })
+
+      service_name = incident.service&.name || "Sistem"
+      service_slug = incident.service&.slug || "system"
+      sev = incident.severity || "SEV-2"
+
+      user_prompt = <<~PROMPT
+        Aşağıdaki olay bilgileri doğrultusunda son kullanıcılar için "#{phase}" aşamasında bir kurumsal müşteri duyurusu üret:
+        - Servis: #{service_name} (#{service_slug})
+        - Kritiklik Seviyesi: #{sev}
+        - Aşama (Phase): #{phase}
+        - Olay Başlığı: #{incident.title}
+        - Teknik Neden Özeti: #{incident.hypothesis || incident.reasoning || 'Servis telemetrisinde anomali'}
+
+        KESİN KURAL: Teknik jargondan (DB lock, SQL, stack trace, 504, Redis, timeout vb.) tamamen arındırılmış kurumsal Türkçe metin olmalıdır.
+      PROMPT
+
+      body = {
+        system_instruction: {
+          parts: [{ text: CUSTOMER_STATUS_SYSTEM_INSTRUCTION }]
+        },
+        contents: [
+          {
+            role: "user",
+            parts: [{ text: user_prompt }]
+          }
+        ],
+        generationConfig: {
+          responseMimeType: "application/json",
+          responseSchema: CUSTOMER_STATUS_RESPONSE_SCHEMA,
+          temperature: 0.2
+        }
+      }
+
+      request.body = body.to_json
+      response = http.request(request)
+
+      unless response.is_a?(Net::HTTPSuccess)
+        raise "Gemini Customer Status API HTTP #{response.code}: #{response.body}"
+      end
+
+      parsed_response = JSON.parse(response.body)
+      text_content = parsed_response.dig("candidates", 0, "content", "parts", 0, "text")
+      unless text_content
+        raise "Gemini API müşteri duyurusu yanıtında metin içeriği bulunamadı."
+      end
+
+      JSON.parse(text_content).with_indifferent_access
+    end
+
+    def fallback_customer_status_message(incident:, phase:)
+      service = incident.service
+      service_name = service&.name || "Sistem"
+      slug = service&.slug.to_s.downcase
+      sev = incident.severity.to_s
+
+      case phase.to_s
+      when "investigating"
+        if sev == "SEV-1" || slug == "checkout"
+          {
+            headline: "#{service_name} İşlemleri İncelemesi",
+            public_message: "#{service_name} ve sipariş onaylama adımlarında yaşanan geçici aksaklıklar teknik ekibimiz tarafından en yüksek öncelikle incelenmektedir. Yeni siparişleriniz güvende olup sistemlerimiz kontrol altındadır."
+          }
+        elsif sev == "SEV-2" || slug == "cart"
+          {
+            headline: "#{service_name} Servisi Performans Takibi",
+            public_message: "#{service_name} ve indirim kuponu uygulama adımlarında bazı kullanıcılarımızın karşılaştığı yavaşlamalar teknik ekibimiz tarafından incelenmektedir."
+          }
+        elsif sev == "SEV-3"
+          {
+            headline: "#{service_name} Servisi Rutin İnceleme",
+            public_message: "#{service_name} servisinde arka plan optimizasyonu ve rutin telemetri kontrolleri teknik ekiplerimiz tarafından yakından takip edilmektedir. Ana kullanıcı akışları kesintisiz hizmet vermektedir."
+          }
+        else
+          {
+            headline: "#{service_name} Servisi İncelemesi",
+            public_message: "#{service_name} servisinde tespit edilen geçici dalgalanma teknik ekiplerimiz tarafından yakından takip edilmekte ve incelenmektedir."
+          }
+        end
+      when "identified"
+        if sev == "SEV-1" || slug == "checkout"
+          {
+            headline: "#{service_name} Kurtarma Müdahalesi Devam Ediyor",
+            public_message: "#{service_name} adımlarındaki aksaklığın kaynağı tespit edilmiş olup teknik kurtarma planımız devreye alınmıştır. Servisin en kısa sürede tam kapasiteye ulaşması hedeflenmektedir."
+          }
+        elsif sev == "SEV-2" || slug == "cart"
+          {
+            headline: "#{service_name} Düzeltme Çalışması Başlatıldı",
+            public_message: "#{service_name} adımlarındaki gecikmenin nedeni belirlenmiş olup mühendislerimizin hazırladığı düzeltme planı sisteme uygulanmaktadır."
+          }
+        else
+          {
+            headline: "#{service_name} İyileştirme Adımı Devrede",
+            public_message: "#{service_name} servisindeki performans kaybının kaynağı tespit edilmiş ve gerekli iyileştirme çalışmaları başlatılmıştır."
+          }
+        end
+      when "monitoring"
+        {
+          headline: "#{service_name} Servis Stabilitesi İzleniyor",
+          public_message: "Uygulanan teknik müdahale sonrası #{service_name} servisinde stabilite sağlanmış olup sistem metrikleri ve sipariş akışı yakından izlenmektedir."
+        }
+      when "autonomous_resolved"
+        {
+          headline: "#{service_name} Otonom Olarak Optimize Edildi",
+          public_message: "#{service_name} servisinde tespit edilen hafif performans dalgalanması akıllı sistemlerimiz tarafından insan müdahalesine gerek kalmadan otonom olarak giderilmiş ve tam performans sağlanmıştır."
+        }
+      when "resolved"
+        if sev == "SEV-1" || slug == "checkout"
+          {
+            headline: "#{service_name} Servisi Tamamen Normale Döndü",
+            public_message: "#{service_name} servisimizdeki tüm aksaklıklar başarıyla giderilmiş, sipariş ve ödeme akışı kesintisiz olarak normale dönmüştür. Gösterdiğiniz sabır ve anlayış için teşekkür ederiz."
+          }
+        elsif sev == "SEV-2" || slug == "cart"
+          {
+            headline: "#{service_name} Servisi Başarıyla Çözüldü",
+            public_message: "#{service_name} ve kupon hesaplama servisimiz tekrar sorunsuz şekilde çalışmaktadır. Tüm kullanıcılarımız sepet ve satın alma işlemlerini güvenle tamamlayabilir."
+          }
+        else
+          {
+            headline: "#{service_name} Servisi Operasyonel",
+            public_message: "#{service_name} servisindeki çalışmalar tamamlanmış olup tüm sistemlerimiz tam kapasiteyle ve sorunsuz olarak hizmet vermektedir."
+          }
+        end
+      else
+        {
+          headline: "#{service_name} Durum Güncellemesi",
+          public_message: "#{service_name} servisi için güncel durum takibi yapılmakta ve sistem sağlığı doğrulanmaktadır."
+        }
+      end.with_indifferent_access
     end
   end
 end
