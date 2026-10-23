@@ -199,14 +199,40 @@ export interface PlanActionResponse {
   incident: IncidentDetail;
 }
 
+export interface SendMessageResponse {
+  status: string;
+  message: string;
+  engineer_message: WarRoomMessage;
+  incident: IncidentDetail;
+}
+
+export async function sendWarRoomMessage(
+  incidentId: number,
+  content: string,
+  senderName: string = "Nöbetçi Mühendis (On-Call SRE)"
+): Promise<SendMessageResponse> {
+  const res = await fetch(`${API_BASE}/incidents/${incidentId}/messages`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ content, sender_name: senderName })
+  });
+
+  const data = await res.json();
+  if (!res.ok) {
+    throw new Error(data.error || `Mesaj iletilemedi: ${res.statusText}`);
+  }
+  return data;
+}
+
 export async function approveIncidentPlan(
   incidentId: number,
-  approvedBy: string = "Nöbetçi Mühendis (On-Call SRE)"
+  approvedBy: string = "Nöbetçi Mühendis (On-Call SRE)",
+  planId?: string
 ): Promise<PlanActionResponse> {
   const res = await fetch(`${API_BASE}/incidents/${incidentId}/approve_plan`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ approved_by: approvedBy })
+    body: JSON.stringify({ approved_by: approvedBy, plan_id: planId })
   });
 
   const data = await res.json();

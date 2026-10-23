@@ -146,7 +146,43 @@ class RemediationServiceTest < ActiveSupport::TestCase
     assert_includes events, "plan_rejected"
   end
 
-  test "SEV-1 approve_plan! is blocked by GuardrailEngine" do
+  test "SEV-1 approve_plan! allows engineer to approve and execute @solver plan" do
+    incident = Incident.create!(
+      service: @checkout,
+      title: "DB Lock",
+      severity: "SEV-1",
+      status: "investigating",
+      autonomy_mode: "manual_command_only",
+      escalation_target: "on_call_and_team_lead",
+      recommended_action_plan: {
+        "plan_id" => "PLAN #01",
+        "title" => "Kill Locks",
+        "tool_name" => "kill_db_locks_and_failover"
+      }
+    )
+
+    incident.war_room_messages.create!(
+      sender_type: "gemini_ai_agent",
+      sender_name: "@solver (AI SRE Ajanı)",
+      message_type: "action_card",
+      action_status: "pending",
+      content: "Plan hazırlandı",
+      action_card_payload: {
+        "plan_id" => "PLAN #01",
+        "title" => "Kill Locks",
+        "tool_name" => "kill_db_locks_and_failover"
+      }
+    )
+
+    assert_nothing_raised do
+      AiSre::RemediationService.approve_plan!(incident, approved_by: "Deniz (On-Call SRE)")
+    end
+
+    assert_equal "resolved", incident.reload.status
+    assert_equal "operational", @checkout.reload.status
+  end
+
+  test "SEV-1 approve_plan! without approved_by is blocked by GuardrailEngine" do
     incident = Incident.create!(
       service: @checkout,
       title: "DB Lock",
@@ -162,7 +198,7 @@ class RemediationServiceTest < ActiveSupport::TestCase
     )
 
     assert_raises(AiSre::GuardrailEngine::UnauthorizedActionError) do
-      AiSre::RemediationService.approve_plan!(incident)
+      AiSre::RemediationService.approve_plan!(incident, approved_by: nil)
     end
 
     assert_equal "investigating", incident.reload.status

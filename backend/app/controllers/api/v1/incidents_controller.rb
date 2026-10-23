@@ -21,12 +21,19 @@ module Api
       def approve_plan
         incident = Incident.includes(:service, :incident_events, :war_room_messages).find(params[:id])
         approved_by = params[:approved_by] || "Nöbetçi Mühendis (On-Call SRE)"
+        plan_id = params[:plan_id]
+        message_id = params[:message_id]
 
-        AiSre::RemediationService.approve_plan!(incident, approved_by: approved_by)
+        AiSre::RemediationService.approve_plan!(
+          incident,
+          approved_by: approved_by,
+          plan_id: plan_id,
+          message_id: message_id
+        )
 
         render json: {
           status: "executed",
-          message: "Eylem planı başarıyla onaylandı ve uygulandı.",
+          message: "İmplementasyon planı başarıyla onaylandı ve uygulandı.",
           incident: serialize_incident(incident.reload, full: true)
         }, status: :ok
       rescue ActiveRecord::RecordNotFound
@@ -35,6 +42,40 @@ module Api
         render json: { error: e.message, code: "GUARDRAIL_LOCKED" }, status: :forbidden
       rescue AiSre::RemediationService::AlreadyResolvedError => e
         render json: { error: e.message, code: "ALREADY_RESOLVED" }, status: :unprocessable_entity
+      rescue StandardError => e
+        render json: { error: e.message }, status: :internal_server_error
+      end
+
+      def create_message
+        incident = Incident.includes(:service, :incident_events, :war_room_messages).find(params[:id])
+        content = params[:content].to_s.strip
+
+        if content.blank?
+          return render json: { error: "Mesaj içeriği boş olamaz." }, status: :unprocessable_entity
+        end
+
+        sender_name = params[:sender_name].presence || "Nöbetçi Mühendis (On-Call SRE)"
+        sender_type = params[:sender_type].presence || "engineer"
+
+        # Mühendis mesajını kaydet
+        engineer_msg = incident.war_room_messages.create!(
+          sender_type: sender_type,
+          sender_name: sender_name,
+          content: content,
+          message_type: "text"
+        )
+
+        # @solver War Room orkestratörünü tetikle
+        AiSre::WarRoomOrchestrator.call(incident: incident, engineer_message: engineer_msg)
+
+        render json: {
+          status: "ok",
+          message: "Mesaj iletildi ve @solver yanıtladı.",
+          engineer_message: engineer_msg,
+          incident: serialize_incident(incident.reload, full: true)
+        }, status: :created
+      rescue ActiveRecord::RecordNotFound
+        render json: { error: "Incident not found" }, status: :not_found
       rescue StandardError => e
         render json: { error: e.message }, status: :internal_server_error
       end

@@ -11,16 +11,16 @@ module AiSre
       keyword_init: true
     )
 
-    def self.execute!(incident:, execution_mode:, approved_by: nil)
-      new(incident: incident, execution_mode: execution_mode, approved_by: approved_by).execute!
+    def self.execute!(incident:, execution_mode:, approved_by: nil, plan: nil)
+      new(incident: incident, execution_mode: execution_mode, approved_by: approved_by, plan: plan).execute!
     end
 
-    def initialize(incident:, execution_mode:, approved_by: nil)
+    def initialize(incident:, execution_mode:, approved_by: nil, plan: nil)
       @incident = incident
       @service = incident.service
       @execution_mode = execution_mode.to_sym
       @approved_by = approved_by || "system"
-      @plan = incident.recommended_action_plan || {}
+      @plan = plan || incident.recommended_action_plan || {}
     end
 
     def execute!
@@ -65,6 +65,8 @@ module AiSre
         AiSre::GuardrailEngine.authorize_autonomous_execution!(@incident)
       when :human_approved
         AiSre::GuardrailEngine.authorize_approved_plan!(@incident, approved_by: @approved_by)
+      when :engineer_command
+        AiSre::GuardrailEngine.authorize_engineer_command!(@incident, engineer_name: @approved_by)
       else
         raise ArgumentError, "Bilinmeyen execution_mode: #{@execution_mode}"
       end
@@ -75,6 +77,40 @@ module AiSre
       now = Time.current.strftime("%H:%M:%S")
 
       case tool_name
+      when "inspect_db_locks"
+        terminal = [
+          "[#{now}] [DB-ADMIN] Target: #{cluster} engine='PostgreSQL 16.2 Enterprise'",
+          "[#{now}] [QUERY] SELECT pid, age(clock_timestamp(), query_start), usename, state, query FROM pg_stat_activity WHERE wait_event_type = 'Lock';",
+          "[#{now}] [LOCK-DETECT] 48 transactions waiting on exclusive row-level lock (relation: payment_records).",
+          "[#{now}] [BLOCKER-PID] Transaction PID 4821 holds LockRows on 'order_uuid=qc_9941a87'; 47 downstream threads queueing.",
+          "[#{now}] [METRICS] In-flight transactions: 1,842 | Pool capacity: 98% exhausted | p99 latency: 14,200ms."
+        ].join("\n")
+
+        verification = "Aktif veritabanı kilitleri incelendi: payment_records üzerinde 48 iş parçacığının kilitli olduğu doğrulandı."
+        [terminal, verification]
+
+      when "verify_health"
+        terminal = [
+          "[#{now}] [HEALTHCHECK] Sending synthetic checkout probes across all regions (EU-West, EU-Central)...",
+          "[#{now}] [PROBE-RESULT] EU-West: HTTP 200 OK (210ms) | EU-Central: HTTP 200 OK (198ms)",
+          "[#{now}] [METRIC-CHECK] Error rate: 0.00% | Active DB Locks: 0 | Pool utilization: 12%",
+          "[#{now}] [VERIFICATION] All core checkout flows verified healthy and responsive."
+        ].join("\n")
+
+        verification = "Tüm sentetik sağlık kontrolleri başarılı: Servis yanıt süresi 210ms altında, hata oranı %0.0."
+        [terminal, verification]
+
+      when "kill_db_locks"
+        terminal = [
+          "[#{now}] [DB-ADMIN] Target: #{cluster} table='payment_records'",
+          "[#{now}] [LOCK-TERMINATE] 48 blocked row-lock threads terminated via SIGTERM.",
+          "[#{now}] [POOL-RESET] Connection pool recycled. Active pool utilization: 14%.",
+          "[#{now}] [SUCCESS] Deadlock resolved in 820ms. Gateway latency: 240ms (p99)."
+        ].join("\n")
+
+        verification = "Kilitli 48 işlem sonlandırıldı ve bağlantı havuzu sıfırlandı."
+        [terminal, verification]
+
       when "flush_cache"
         terminal = [
           "[#{now}] [EDGE-CACHE] Target: #{cluster} tag='catalog-thumbnails'",

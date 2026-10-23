@@ -8,6 +8,7 @@ Rails.application.routes.draw do
         member do
           post :approve_plan
           post :reject_plan
+          post :messages, to: "incidents#create_message"
         end
       end
 

@@ -7,8 +7,8 @@ module AiSre
       new(incident).route_after_triage!
     end
 
-    def self.approve_plan!(incident, approved_by: "Nöbetçi Mühendis (On-Call SRE)")
-      new(incident).approve_plan!(approved_by: approved_by)
+    def self.approve_plan!(incident, approved_by: "Nöbetçi Mühendis (On-Call SRE)", plan_id: nil, message_id: nil)
+      new(incident).approve_plan!(approved_by: approved_by, plan_id: plan_id, message_id: message_id)
     end
 
     def self.reject_plan!(incident, rejected_by: "Nöbetçi Mühendis (On-Call SRE)", reason: nil)
@@ -32,22 +32,33 @@ module AiSre
       @incident.reload
     end
 
-    def approve_plan!(approved_by: "Nöbetçi Mühendis (On-Call SRE)")
+    def approve_plan!(approved_by: "Nöbetçi Mühendis (On-Call SRE)", plan_id: nil, message_id: nil)
       if @incident.status == "resolved"
         raise AlreadyResolvedError, "Olay (#{@incident.incident_code}) zaten çözülmüş durumda."
       end
 
-      # Guardrail Engine doğrulaması (SEV-1 ise UnauthorizedActionError fırlatır)
+      # Guardrail Engine doğrulaması (insan onayı kontrolü)
       AiSre::GuardrailEngine.authorize_approved_plan!(@incident, approved_by: approved_by)
 
-      plan = @incident.recommended_action_plan || {}
-      plan_id = plan["plan_id"] || "PLAN #01"
-      title = plan["title"] || "Sistem Müdahalesi"
+      # İlgili action_card mesajını bul (mesaj id'si, plan_id veya en son pending plan)
+      action_card_msg =
+        if message_id.present?
+          @incident.war_room_messages.find_by(id: message_id)
+        elsif plan_id.present?
+          @incident.war_room_messages.where(message_type: "action_card").to_a.find { |m| m.action_card_payload&.dig("plan_id") == plan_id }
+        else
+          @incident.war_room_messages.where(message_type: "action_card", action_status: "pending").last ||
+            @incident.war_room_messages.where(message_type: "action_card").last
+        end
+
+      plan = action_card_msg&.action_card_payload.presence || @incident.recommended_action_plan || {}
+      active_plan_id = plan["plan_id"] || plan[:plan_id] || "PLAN #01"
+      title = plan["title"] || plan[:title] || "Sistem Müdahalesi"
 
       @incident.incident_events.create!(
         event_type: "plan_approved",
         actor: "on_call_engineer",
-        title: "Eylem Planı Onaylandı (#{plan_id})",
+        title: "İmplementasyon Planı Onaylandı (#{active_plan_id})",
         details: "#{approved_by} tarafından '#{title}' planı tek tıkla onaylandı ve icra başlatıldı.",
         occurred_at: Time.current
       )
@@ -56,26 +67,25 @@ module AiSre
       result = AiSre::SystemToolRunner.execute!(
         incident: @incident,
         execution_mode: :human_approved,
-        approved_by: approved_by
+        approved_by: approved_by,
+        plan: plan
       )
 
-      # War Room içindeki pending Action Card mesajını executed olarak güncelle
-      action_card_msg = @incident.war_room_messages.find_by(message_type: "action_card", action_status: "pending")
-      payload = build_action_card_payload(result: result, approved_by: approved_by)
+      payload = build_action_card_payload(result: result, approved_by: approved_by, plan: plan)
 
       if action_card_msg
         action_card_msg.update!(
           action_status: "executed",
           action_card_payload: payload,
-          content: "Eylem planı #{approved_by} onayıyla başarıyla uygulandı."
+          content: "#{title} implementasyon planı #{approved_by} onayıyla başarıyla uygulandı."
         )
       else
         @incident.war_room_messages.create!(
           sender_type: "gemini_ai_agent",
-          sender_name: "Gemini AI SRE Ajanı",
+          sender_name: "@solver (AI SRE Ajanı)",
           message_type: "action_card",
           action_status: "executed",
-          content: "Eylem planı #{approved_by} onayıyla başarıyla uygulandı.",
+          content: "#{title} implementasyon planı #{approved_by} onayıyla başarıyla uygulandı.",
           action_card_payload: payload
         )
       end
@@ -83,9 +93,9 @@ module AiSre
       # Ajanın teknik doğrulama mesajı
       @incident.war_room_messages.create!(
         sender_type: "gemini_ai_agent",
-        sender_name: "Gemini AI SRE Ajanı",
+        sender_name: "@solver (AI SRE Ajanı)",
         message_type: "system_diagnostic",
-        content: "Müdahale tamamlandı: #{result.verification_summary}\n\nTeknik Çıktı:\n#{result.terminal_output}"
+        content: "İmplementasyon tamamlandı: #{result.verification_summary}\n\nTeknik Çıktı:\n#{result.terminal_output}"
       )
 
       @incident.incident_events.create!(
@@ -231,7 +241,7 @@ module AiSre
       )
     end
 
-    # Yol C (SEV-1): Güvenlik Kilidi Bilgilendirmesi
+    # Yol C (SEV-1): AI Hipotez, Hata Açıklaması ve Tek Tıkla İnteraktif İmplementasyon Planı
     def prepare_manual_war_room_state!
       plan = @incident.recommended_action_plan || {}
       payload = {
@@ -244,33 +254,46 @@ module AiSre
         "guardrail_status" => "manual_command_only"
       }
 
+      # 1. @solver Hata ve Hipotez Açıklaması
       @incident.war_room_messages.create!(
         sender_type: "gemini_ai_agent",
-        sender_name: "Gemini AI SRE Ajanı",
+        sender_name: "@solver (AI SRE Ajanı)",
+        message_type: "text",
+        content: "🚨 KRİTİK SEV-1 KRİZİ TESPİT EDİLDİ\n\n" \
+                 "🔍 Hata Açıklaması: #{@incident.reasoning}\n\n" \
+                 "💡 Kök Neden Hipotezi: #{@incident.hypothesis}\n\n" \
+                 "Bu sorunu gidermek üzere aşağıda 'PLAN #01' implementasyon planını hazırladım. " \
+                 "Tek tıkla çalıştırabilir veya sohbet üzerinden bana (@solver) yeni yönergeler vererek planı revize etmemi isteyebilirsiniz."
+      )
+
+      # 2. Tek tıkla çalıştırılabilir ilk implementasyon planı (pending)
+      @incident.war_room_messages.create!(
+        sender_type: "gemini_ai_agent",
+        sender_name: "@solver (AI SRE Ajanı)",
         message_type: "action_card",
-        action_status: "locked",
-        content: "KRİTİK SEV-1 KRİZİ: Tam güvenlik kilidi devrede. Tek tıkla otomatik çalıştırma engellendi; War Room üzerinden adım adım komutlarınızı bekliyorum.",
+        action_status: "pending",
+        content: "İmplementasyon Planı (#{payload['plan_id']}): #{payload['title']}. Onayınız bekleniyor.",
         action_card_payload: payload
       )
 
       @incident.incident_events.create!(
         event_type: "war_room_opened",
         actor: "gemini_ai_agent",
-        title: "War Room Aktif İşbirliği Moduna Geçti (SEV-1)",
-        details: "Nöbetçi Mühendis ve Takım Lideri için canlı kriz odası açıldı. 15 dakikalık SLA geri sayımı devrede.",
+        title: "War Room Açıldı: @solver İmplementasyon Planı Hazırladı (SEV-1)",
+        details: "Nöbetçi Mühendis ve Takım Lideri için canlı kriz odası açıldı. @solver ilk müdahale planını sundu.",
         occurred_at: Time.current
       )
     end
 
-    def build_action_card_payload(result:, approved_by: nil, autonomous: false)
-      plan = @incident.recommended_action_plan || {}
+    def build_action_card_payload(result:, approved_by: nil, autonomous: false, plan: nil)
+      p = plan || @incident.recommended_action_plan || {}
       {
-        "plan_id" => result.plan_id,
-        "title" => result.title,
-        "tool_name" => result.tool_name,
-        "risk_level" => plan["risk_level"] || (autonomous ? "low" : "medium"),
+        "plan_id" => result.plan_id.presence || p["plan_id"] || "PLAN #01",
+        "title" => result.title.presence || p["title"] || "Sistem Müdahalesi",
+        "tool_name" => result.tool_name.presence || p["tool_name"],
+        "risk_level" => p["risk_level"] || (autonomous ? "low" : "high"),
         "hypothesis" => @incident.hypothesis,
-        "steps" => result.executed_steps,
+        "steps" => result.executed_steps.presence || p["steps"],
         "terminal_output" => result.terminal_output,
         "verification_summary" => result.verification_summary,
         "executed_at" => result.executed_at.iso8601,
