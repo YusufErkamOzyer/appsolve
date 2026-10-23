@@ -60,4 +60,27 @@ class Api::V1::Telemetry::SignalsControllerTest < ActionDispatch::IntegrationTes
     assert_equal "approval_required", inc_data["autonomy_mode"]
     assert_equal "on_call_engineer", inc_data["escalation_target"]
   end
+
+  test "POST /api/v1/telemetry/signals handles SEV-3 with autonomous resolution" do
+    payload = {
+      service_slug: "catalog",
+      error_code: "CDN_CACHE_BLOAT",
+      message: "Product image thumbnail cache memory pressure exceeded 92%.",
+      metrics: { error_rate: 0.04 }
+    }
+
+    post api_v1_telemetry_signals_url, params: payload, as: :json
+    assert_response :created
+
+    json = JSON.parse(response.body)
+    inc_data = json["incident"]
+    assert_equal "SEV-3", inc_data["severity"]
+    assert_equal "full_autonomy", inc_data["autonomy_mode"]
+    assert_equal "resolved", inc_data["status"]
+    assert_not_nil inc_data["resolved_at"]
+
+    action_msg = inc_data["messages"].find { |m| m["message_type"] == "action_card" }
+    assert_not_nil action_msg
+    assert_equal "autonomous_executed", action_msg["action_status"]
+  end
 end

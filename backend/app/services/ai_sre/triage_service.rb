@@ -1,12 +1,13 @@
 module AiSre
   class TriageService
-    def self.call(incident, gemini_client: nil)
-      new(incident, gemini_client: gemini_client).call
+    def self.call(incident, gemini_client: nil, auto_route: true)
+      new(incident, gemini_client: gemini_client, auto_route: auto_route).call
     end
 
-    def initialize(incident, gemini_client: nil)
+    def initialize(incident, gemini_client: nil, auto_route: true)
       @incident = incident
       @gemini_client = gemini_client || AiSre::GeminiClient.new
+      @auto_route = auto_route
     end
 
     def call
@@ -30,6 +31,9 @@ module AiSre
 
       # Otonomi Kilidi ve Akıllı Eskalasyon kurallarını işlet
       AiSre::GuardrailEngine.apply_guardrails!(@incident)
+
+      # Adım 3: Üçlü Çözüm Yolu (Yol A otonom çözüm, Yol B eylem kartı, Yol C War Room hazırlığı)
+      AiSre::RemediationService.route_after_triage!(@incident) if @auto_route
 
       @incident.reload
     end

@@ -2,7 +2,7 @@ module Api
   module V1
     class IncidentsController < ApplicationController
       def index
-        incidents = Incident.includes(:service, :incident_events).order(created_at: :desc).limit(50)
+        incidents = Incident.includes(:service, :incident_events, :war_room_messages).order(created_at: :desc).limit(50)
 
         render json: {
           total_count: Incident.count,
@@ -16,6 +16,47 @@ module Api
         render json: serialize_incident(incident, full: true)
       rescue ActiveRecord::RecordNotFound
         render json: { error: "Incident not found" }, status: :not_found
+      end
+
+      def approve_plan
+        incident = Incident.includes(:service, :incident_events, :war_room_messages).find(params[:id])
+        approved_by = params[:approved_by] || "Nöbetçi Mühendis (On-Call SRE)"
+
+        AiSre::RemediationService.approve_plan!(incident, approved_by: approved_by)
+
+        render json: {
+          status: "executed",
+          message: "Eylem planı başarıyla onaylandı ve uygulandı.",
+          incident: serialize_incident(incident.reload, full: true)
+        }, status: :ok
+      rescue ActiveRecord::RecordNotFound
+        render json: { error: "Incident not found" }, status: :not_found
+      rescue AiSre::GuardrailEngine::UnauthorizedActionError => e
+        render json: { error: e.message, code: "GUARDRAIL_LOCKED" }, status: :forbidden
+      rescue AiSre::RemediationService::AlreadyResolvedError => e
+        render json: { error: e.message, code: "ALREADY_RESOLVED" }, status: :unprocessable_entity
+      rescue StandardError => e
+        render json: { error: e.message }, status: :internal_server_error
+      end
+
+      def reject_plan
+        incident = Incident.includes(:service, :incident_events, :war_room_messages).find(params[:id])
+        rejected_by = params[:rejected_by] || "Nöbetçi Mühendis (On-Call SRE)"
+        reason = params[:reason]
+
+        AiSre::RemediationService.reject_plan!(incident, rejected_by: rejected_by, reason: reason)
+
+        render json: {
+          status: "rejected",
+          message: "Eylem planı reddedildi. War Room üzerinden manuel talimatlar bekleniyor.",
+          incident: serialize_incident(incident.reload, full: true)
+        }, status: :ok
+      rescue ActiveRecord::RecordNotFound
+        render json: { error: "Incident not found" }, status: :not_found
+      rescue AiSre::RemediationService::AlreadyResolvedError => e
+        render json: { error: e.message, code: "ALREADY_RESOLVED" }, status: :unprocessable_entity
+      rescue StandardError => e
+        render json: { error: e.message }, status: :internal_server_error
       end
 
       private
@@ -51,13 +92,8 @@ module Api
               details: ev.details,
               occurred_at: ev.occurred_at.iso8601
             }
-          end
-        }
-
-        if full
-          data[:raw_payload] = inc.raw_payload
-          data[:recommended_action_plan] = inc.recommended_action_plan
-          data[:messages] = inc.war_room_messages.map do |m|
+          end,
+          messages: inc.war_room_messages.map do |m|
             {
               id: m.id,
               sender_type: m.sender_type,
@@ -69,6 +105,9 @@ module Api
               created_at: m.created_at.iso8601
             }
           end
+        }
+
+        if full
           data[:post_mortem] = inc.post_mortem ? {
             summary: inc.post_mortem.summary,
             root_cause: inc.post_mortem.root_cause,

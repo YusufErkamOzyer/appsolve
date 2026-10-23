@@ -3,13 +3,19 @@
 import React from "react";
 import { Incident } from "@/lib/api";
 import { SlaCountdown } from "./SlaCountdown";
+import { ActionCard } from "./ActionCard";
 
 interface IncidentStreamProps {
   incident: Incident | null;
   onOpenSimulator?: () => void;
+  onIncidentUpdated?: () => void;
 }
 
-export function IncidentStream({ incident, onOpenSimulator }: IncidentStreamProps) {
+export function IncidentStream({
+  incident,
+  onOpenSimulator,
+  onIncidentUpdated,
+}: IncidentStreamProps) {
   if (!incident) {
     return (
       <section className="flex-1 border-[1.5px] border-[#522D60] bg-[#FFFFFF] os-window-shadow flex flex-col items-center justify-center p-12 text-center select-none min-h-[580px]">
@@ -34,12 +40,25 @@ export function IncidentStream({ incident, onOpenSimulator }: IncidentStreamProp
 
   const isSev1 = incident.severity === "SEV-1";
   const isSev2 = incident.severity === "SEV-2";
-  const plan = incident.recommended_action_plan;
+  const isSev3 = incident.severity === "SEV-3";
+  const isResolved = incident.status === "resolved";
   const rawPayload = incident.raw_payload || {};
   const metrics = (rawPayload.metrics as Record<string, unknown>) || {};
 
   const createdDate = new Date(incident.created_at);
   const timeStr = createdDate.toLocaleTimeString();
+
+  // MTTR Hesabı
+  const calculateMttr = () => {
+    if (!incident.resolved_at) return null;
+    const diffMs = new Date(incident.resolved_at).getTime() - new Date(incident.created_at).getTime();
+    const diffSecs = Math.max(1, Math.round(diffMs / 1000));
+    if (diffSecs < 60) return `${diffSecs} sn`;
+    const diffMins = Math.round(diffSecs / 60);
+    return `${diffMins} dk`;
+  };
+
+  const mttrFormatted = calculateMttr();
 
   return (
     <section className="flex-1 border-[1.5px] border-[#522D60] bg-[#FFFFFF] os-window-shadow flex flex-col h-full min-h-[580px] lg:max-h-[calc(100vh-80px)] select-none">
@@ -51,28 +70,35 @@ export function IncidentStream({ incident, onOpenSimulator }: IncidentStreamProp
         </div>
 
         <div className="flex items-center gap-2 text-[10px]">
-          <span
-            className={`inline-flex items-center gap-1 font-bold ${
-              isSev1
-                ? "text-[#D9383A]"
-                : isSev2
-                ? "text-[#F2A67B]"
-                : "text-[#522D60]"
-            }`}
-          >
+          {isResolved ? (
+            <span className="inline-flex items-center gap-1 font-bold text-[#1E8E5A] px-2 py-0.5 bg-[#EEFBF3] border border-[#1E8E5A]">
+              <span className="w-1.5 h-1.5 rounded-full bg-[#1E8E5A]" />
+              ÇÖZÜLDÜ
+            </span>
+          ) : (
             <span
-              className={`w-2 h-2 rounded-full ${
+              className={`inline-flex items-center gap-1 font-bold ${
                 isSev1
-                  ? "bg-[#D9383A] animate-pulse"
+                  ? "text-[#D9383A]"
                   : isSev2
-                  ? "bg-[#F2A67B]"
-                  : "bg-[#FFD38B]"
+                  ? "text-[#F2A67B]"
+                  : "text-[#522D60]"
               }`}
-            />
-            {incident.severity}
-          </span>
+            >
+              <span
+                className={`w-2 h-2 rounded-full ${
+                  isSev1
+                    ? "bg-[#D9383A] animate-pulse"
+                    : isSev2
+                    ? "bg-[#F2A67B]"
+                    : "bg-[#FFD38B]"
+                }`}
+              />
+              {incident.severity}
+            </span>
+          )}
 
-          {incident.sla_deadline && incident.status !== "resolved" && (
+          {incident.sla_deadline && !isResolved && (
             <>
               <span className="text-[#522D60]/30">|</span>
               <SlaCountdown
@@ -93,7 +119,7 @@ export function IncidentStream({ incident, onOpenSimulator }: IncidentStreamProp
         <div className="relative pl-6 sm:pl-8 space-y-6 before:content-[''] before:absolute before:left-2 before:top-2 before:bottom-2 before:w-[2px] before:bg-[#522D60]/20">
           {/* Card 1: RAW TELEMETRY (Soft Pink/Red Tint) */}
           <div className="relative space-y-1.5">
-            {/* Timeline Node Dot & Header */}
+            {/* Timeline Node */}
             <div className="flex items-center gap-2 font-mono text-[10px] -ml-6 sm:-ml-8">
               <span className="w-4 h-4 rounded-full bg-[#FFFFFF] border-2 border-[#D9383A] flex items-center justify-center shrink-0 z-10">
                 <span className="w-1.5 h-1.5 bg-[#D9383A] rounded-full" />
@@ -114,7 +140,15 @@ export function IncidentStream({ incident, onOpenSimulator }: IncidentStreamProp
                   </h3>
                 </div>
                 {incident.severity && (
-                  <span className="px-1.5 py-0.2 bg-[#D9383A] text-[#FFFFFF] font-mono text-[9px] font-bold border border-[#522D60]">
+                  <span
+                    className={`px-1.5 py-0.2 font-mono text-[9px] font-bold border border-[#522D60] ${
+                      isSev1
+                        ? "bg-[#D9383A] text-[#FFFFFF]"
+                        : isSev2
+                        ? "bg-[#F2A67B] text-[#522D60]"
+                        : "bg-[#FFD38B] text-[#522D60]"
+                    }`}
+                  >
                     {incident.severity}
                   </span>
                 )}
@@ -248,83 +282,11 @@ export function IncidentStream({ incident, onOpenSimulator }: IncidentStreamProp
             </div>
           </div>
 
-          {/* Card 4: ACTION PLAN BLUEPRINT (2-Column White Card) */}
-          {plan && (
-            <div className="relative space-y-1.5">
-              <div className="flex items-center gap-2 font-mono text-[10px] -ml-6 sm:-ml-8">
-                <span className="w-4 h-4 rounded-full bg-[#FFFFFF] border-2 border-[#522D60] flex items-center justify-center shrink-0 z-10">
-                  <span className="w-1.5 h-1.5 bg-[#522D60] rounded-full" />
-                </span>
-                <span className="font-bold text-[#80426E] tabular-nums">{timeStr}</span>
-                <span className="px-1.5 py-0.2 bg-[#FFFFFF] border border-[#522D60] text-[#522D60] font-bold tracking-wider">
-                  EYLEM PLANI
-                </span>
-              </div>
-
-              <div className="border-[1.5px] border-[#522D60] bg-[#FFFFFF] p-3 space-y-3 os-btn-shadow">
-                {/* Header Row */}
-                <div className="flex items-center justify-between border-b border-[#522D60]/20 pb-2">
-                  <div className="flex items-center gap-2 font-mono text-xs">
-                    <span className="text-[#522D60] text-sm">📋</span>
-                    <span className="font-bold text-[#522D60]">
-                      {plan.plan_id || "PLAN #01"}: {plan.title || "Sistem Müdahalesi"}
-                    </span>
-                  </div>
-                  <span className="px-1.5 py-0.2 bg-[#FAF6F2] text-[#522D60] font-mono text-[9px] font-bold border border-[#522D60]">
-                    İCRAYA HAZIR
-                  </span>
-                </div>
-
-                {/* 2-Column Split: Steps (Left) + Meta/Button (Right) */}
-                <div className="grid grid-cols-1 md:grid-cols-12 gap-3 items-center">
-                  {/* Left Column: Numbered Steps */}
-                  <div className="md:col-span-7 space-y-1.5 font-mono text-[11px]">
-                    {plan.steps && plan.steps.length > 0 ? (
-                      plan.steps.map((st: string, idx: number) => (
-                        <div key={idx} className="flex items-start gap-2 bg-[#FAF6F2] p-1.5 border border-[#522D60]/20">
-                          <span className="w-4 h-4 shrink-0 bg-[#522D60] text-[#FFFFFF] rounded-full flex items-center justify-center text-[9px] font-bold">
-                            {idx + 1}
-                          </span>
-                          <span className="text-[#522D60] leading-snug">{st}</span>
-                        </div>
-                      ))
-                    ) : (
-                      <div className="text-xs text-[#80426E]">Adım detayları hazırlanıyor...</div>
-                    )}
-                  </div>
-
-                  {/* Right Column: Meta + Big CTA Button */}
-                  <div className="md:col-span-5 md:border-l md:border-[#522D60]/20 md:pl-3 space-y-3 font-mono text-[11px]">
-                    <div className="space-y-1 text-[10px] text-[#80426E]">
-                      <div className="flex justify-between">
-                        <span>Tahmini Süre:</span>
-                        <strong className="text-[#522D60]">10-15 dk</strong>
-                      </div>
-                      <div className="flex justify-between">
-                        <span>Etki Seviyesi:</span>
-                        <strong className="text-[#522D60]">Yüksek</strong>
-                      </div>
-                      <div className="flex justify-between">
-                        <span>Risk Durumu:</span>
-                        <strong className="text-[#D9383A]">
-                          {(plan.risk_level || "orta").toUpperCase()}
-                        </strong>
-                      </div>
-                    </div>
-
-                    <button
-                      type="button"
-                      disabled
-                      className="w-full py-2 px-3 bg-[#F2A67B] text-[#522D60] border-[1.5px] border-[#522D60] font-mono font-bold text-xs os-btn-shadow cursor-not-allowed opacity-85 select-none"
-                      title="Modül 4 ile tek tıkla onaylama ve icra motoru bağlanacaktır"
-                    >
-                      [ ONAYLA VE UYGULA ]
-                    </button>
-                  </div>
-                </div>
-              </div>
-            </div>
-          )}
+          {/* Card 4: ACTION CARD 1.1 (Interactive Retro Component) */}
+          <ActionCard
+            incident={incident}
+            onActionComplete={onIncidentUpdated}
+          />
 
           {/* Subsequent Events & Timeline nodes */}
           {incident.events && incident.events.length > 4 && (
@@ -348,6 +310,56 @@ export function IncidentStream({ incident, onOpenSimulator }: IncidentStreamProp
               </div>
             ))
           )}
+
+          {/* Final Resolution Summary Card when resolved */}
+          {isResolved && (
+            <div className="relative space-y-1.5">
+              <div className="flex items-center gap-2 font-mono text-[10px] -ml-6 sm:-ml-8">
+                <span className="w-4 h-4 rounded-full bg-[#FFFFFF] border-2 border-[#1E8E5A] flex items-center justify-center shrink-0 z-10">
+                  <span className="w-1.5 h-1.5 bg-[#1E8E5A] rounded-full" />
+                </span>
+                <span className="font-bold text-[#1E8E5A] tabular-nums">
+                  {incident.resolved_at ? new Date(incident.resolved_at).toLocaleTimeString() : timeStr}
+                </span>
+                <span className="px-1.5 py-0.2 bg-[#EEFBF3] border border-[#1E8E5A] text-[#1E8E5A] font-bold tracking-wider">
+                  ÇÖZÜM DOĞRULAMASI
+                </span>
+              </div>
+
+              <div className="border-[1.5px] border-[#1E8E5A] bg-[#EEFBF3] p-3.5 space-y-2.5 os-btn-shadow">
+                <div className="flex items-center justify-between border-b border-[#1E8E5A]/30 pb-2">
+                  <div className="flex items-center gap-2 font-mono text-xs font-bold text-[#1E8E5A]">
+                    <span>✓</span>
+                    <span>OLAY KAPATILDI — SİSTEM OPERASYONEL</span>
+                  </div>
+                  <span className="px-2 py-0.5 bg-[#1E8E5A] text-[#FFFFFF] font-mono text-[9px] font-bold border border-[#522D60]">
+                    RESOLVED
+                  </span>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 font-mono text-[11px] text-[#522D60]">
+                  <div className="bg-[#FFFFFF] p-2 border border-[#1E8E5A]/30">
+                    <span className="text-[9px] text-[#80426E] uppercase block">Çözüm Yolu:</span>
+                    <strong className="text-[11px] text-[#1E8E5A]">
+                      {isSev3 ? "Yol A (Tam Otonom)" : isSev2 ? "Yol B (Tek Tık Onay)" : "Yol C (War Room)"}
+                    </strong>
+                  </div>
+                  <div className="bg-[#FFFFFF] p-2 border border-[#1E8E5A]/30">
+                    <span className="text-[9px] text-[#80426E] uppercase block">Çözüm Süresi (MTTR):</span>
+                    <strong className="text-[11px] text-[#522D60]">{mttrFormatted || "< 10 sn"}</strong>
+                  </div>
+                  <div className="bg-[#FFFFFF] p-2 border border-[#1E8E5A]/30">
+                    <span className="text-[9px] text-[#80426E] uppercase block">Servis Durumu:</span>
+                    <strong className="text-[11px] text-[#1E8E5A]">OPERATIONAL (ÇALIŞIYOR)</strong>
+                  </div>
+                </div>
+
+                <p className="font-sans text-[11px] text-[#522D60]/90 leading-tight">
+                  Tüm telemetri kontrolleri ve sağlık sorguları tamamlandı. {incident.service?.name} servisi kesintisiz hizmet vermeye devam etmektedir.
+                </p>
+              </div>
+            </div>
+          )}
         </div>
       </div>
 
@@ -359,7 +371,7 @@ export function IncidentStream({ incident, onOpenSimulator }: IncidentStreamProp
         <input
           type="text"
           disabled
-          placeholder='Bir talimat, komut veya mesaj yazın... (Örn: "bağlantı havuzunu kontrol et", "işlemi sonlandır")'
+          placeholder='Bir talimat, komut veya mesaj yazın... (Modül 5 ile aktifleşecektir)'
           className="flex-1 bg-[#FFFFFF] border-[1.5px] border-[#522D60] px-3 py-1.5 text-[11px] text-[#522D60]/60 cursor-not-allowed select-none focus:outline-none"
         />
         <button
