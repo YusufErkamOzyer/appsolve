@@ -9,9 +9,11 @@ import { resetSystem } from "@/lib/api";
 
 interface OsNavbarProps {
   onResetComplete?: () => void;
+  onOpenSimulator?: () => void;
+  activeSev1?: boolean;
 }
 
-export function OsNavbar({ onResetComplete }: OsNavbarProps) {
+export function OsNavbar({ onResetComplete, onOpenSimulator, activeSev1 = false }: OsNavbarProps) {
   const pathname = usePathname();
   const [resetting, setResetting] = useState(false);
 
@@ -78,9 +80,20 @@ export function OsNavbar({ onResetComplete }: OsNavbarProps) {
 
         {/* Telemetry Indicator & Tools */}
         <div className="flex items-center gap-2">
+          {onOpenSimulator && (
+            <OsButton
+              variant="apricot"
+              size="sm"
+              onClick={onOpenSimulator}
+              title="Test telemetri sinyali gönder"
+            >
+              ⚡ SİNYAL SİMÜLATÖRÜ
+            </OsButton>
+          )}
+
           <div className="hidden sm:inline-flex items-center gap-1.5 px-2 py-0.5 border border-[#522D60] bg-[#FAF6F2] font-mono text-[10px] text-[#522D60]">
-            <span className="w-1.5 h-1.5 bg-[#1E8E5A] animate-pulse" />
-            <span>API: 3001 ONLINE</span>
+            <span className={`w-1.5 h-1.5 ${activeSev1 ? "bg-[#D9383A] animate-ping" : "bg-[#1E8E5A] animate-pulse"}`} />
+            <span>{activeSev1 ? "SEV-1 ALARM" : "API ONLINE"}</span>
           </div>
 
           <OsClock />

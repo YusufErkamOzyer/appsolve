@@ -52,7 +52,7 @@ module Api
               hypothesis: incident.hypothesis,
               recommended_action_plan: incident.recommended_action_plan,
               created_at: incident.created_at.iso8601,
-              events: incident.incident_events.order(occurred_at: :asc).map do |ev|
+              events: incident.incident_events.order(occurred_at: :asc, id: :asc).map do |ev|
                 {
                   id: ev.id,
                   event_type: ev.event_type,

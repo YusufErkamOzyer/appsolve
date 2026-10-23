@@ -24,7 +24,7 @@ export function OsWindow({
     mulberry: "bg-[#80426E] text-[#FFFFFF]",
     apricot: "bg-[#F2A67B] text-[#522D60] font-bold",
     amber: "bg-[#FFD38B] text-[#522D60] font-bold",
-    crimson: "bg-[#D9383A] text-[#FFFFFF] animate-pulse",
+    crimson: "bg-[#D9383A] text-[#FFFFFF] font-bold",
     paper: "bg-[#FFFFFF] text-[#522D60]",
   }[variant];
 
