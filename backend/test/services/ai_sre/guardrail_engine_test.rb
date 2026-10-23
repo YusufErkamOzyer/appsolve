@@ -102,17 +102,17 @@ class GuardrailEngineTest < ActiveSupport::TestCase
     assert_includes sev1_inc.incident_events.pluck(:event_type), "guardrail_blocked"
   end
 
-  test "authorize_approved_plan! blocks SEV-1 template approval and allows SEV-2" do
+  test "authorize_approved_plan! allows engineer to approve and execute plan for SEV-1 and SEV-2" do
     sev1_inc = Incident.create!(
       service: @checkout,
       title: "DB Lock",
       severity: "SEV-1",
       autonomy_mode: "manual_command_only"
     )
-    assert_raises(AiSre::GuardrailEngine::UnauthorizedActionError) do
-      AiSre::GuardrailEngine.authorize_approved_plan!(sev1_inc)
+    assert_nothing_raised do
+      assert AiSre::GuardrailEngine.authorize_approved_plan!(sev1_inc, approved_by: "Deniz (On-Call SRE)")
     end
-    assert_includes sev1_inc.incident_events.pluck(:event_type), "guardrail_blocked"
+    assert_includes sev1_inc.incident_events.pluck(:event_type), "guardrail_authorized"
 
     sev2_inc = Incident.create!(
       service: @cart,
@@ -121,7 +121,20 @@ class GuardrailEngineTest < ActiveSupport::TestCase
       autonomy_mode: "approval_required"
     )
     assert_nothing_raised do
-      assert AiSre::GuardrailEngine.authorize_approved_plan!(sev2_inc)
+      assert AiSre::GuardrailEngine.authorize_approved_plan!(sev2_inc, approved_by: "Deniz")
     end
+  end
+
+  test "authorize_approved_plan! blocks execution if approved_by is missing" do
+    sev1_inc = Incident.create!(
+      service: @checkout,
+      title: "DB Lock",
+      severity: "SEV-1",
+      autonomy_mode: "manual_command_only"
+    )
+    assert_raises(AiSre::GuardrailEngine::UnauthorizedActionError) do
+      AiSre::GuardrailEngine.authorize_approved_plan!(sev1_inc, approved_by: nil)
+    end
+    assert_includes sev1_inc.incident_events.pluck(:event_type), "guardrail_blocked"
   end
 end

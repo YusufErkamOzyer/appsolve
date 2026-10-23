@@ -1,15 +1,53 @@
 "use client";
 
-import React from "react";
-import { Incident } from "@/lib/api";
+import React, { useState, useRef, useEffect } from "react";
+import { Incident, sendWarRoomMessage } from "@/lib/api";
 import { SlaCountdown } from "./SlaCountdown";
+import { ActionCard } from "./ActionCard";
 
 interface IncidentStreamProps {
   incident: Incident | null;
   onOpenSimulator?: () => void;
+  onIncidentUpdated?: () => void;
 }
 
-export function IncidentStream({ incident, onOpenSimulator }: IncidentStreamProps) {
+const QUICK_PROMPTS = [
+  {
+    label: "🔍 Hatayı ve Kök Nedeni Açıkla",
+    prompt: "@solver tespit edilen hatayı, kök neden hipotezini ve iş etkisini detaylı açıkla",
+  },
+  {
+    label: "⚡ Yeni Bir Kurtarma Planı Hazırla",
+    prompt: "@solver kilitli işlemleri sonlandırıp bağlantı havuzunu sıfırlayan yeni bir plan oluştur",
+  },
+  {
+    label: "🔄 Planı Güncelle: Replikaya Geç",
+    prompt: "@solver planı güncelle: Kilitleri temizle ve trafiği geçici olarak ikincil replikaya yönlendir",
+  },
+  {
+    label: "✓ Servisi Doğrula ve Olayı Kapat",
+    prompt: "@solver servis sağlığını doğrula ve olayı çözüldü olarak kapat",
+  },
+];
+
+export function IncidentStream({
+  incident,
+  onOpenSimulator,
+  onIncidentUpdated,
+}: IncidentStreamProps) {
+  const [commandInput, setCommandInput] = useState<string>("");
+  const [isSending, setIsSending] = useState<boolean>(false);
+  const [sendError, setSendError] = useState<string | null>(null);
+  const streamEndRef = useRef<HTMLDivElement | null>(null);
+  const inputRef = useRef<HTMLInputElement | null>(null);
+
+  // Auto-scroll to bottom of stream when messages update
+  useEffect(() => {
+    if (incident?.messages && incident.messages.length > 0) {
+      streamEndRef.current?.scrollIntoView({ behavior: "smooth" });
+    }
+  }, [incident?.messages?.length, incident?.status]);
+
   if (!incident) {
     return (
       <section className="flex-1 border-[1.5px] border-[#522D60] bg-[#FFFFFF] os-window-shadow flex flex-col items-center justify-center p-12 text-center select-none min-h-[580px]">
@@ -34,12 +72,54 @@ export function IncidentStream({ incident, onOpenSimulator }: IncidentStreamProp
 
   const isSev1 = incident.severity === "SEV-1";
   const isSev2 = incident.severity === "SEV-2";
-  const plan = incident.recommended_action_plan;
+  const isSev3 = incident.severity === "SEV-3";
+  const isResolved = incident.status === "resolved";
   const rawPayload = incident.raw_payload || {};
   const metrics = (rawPayload.metrics as Record<string, unknown>) || {};
 
   const createdDate = new Date(incident.created_at);
   const timeStr = createdDate.toLocaleTimeString();
+
+  // MTTR Hesabı
+  const calculateMttr = () => {
+    if (!incident.resolved_at) return null;
+    const diffMs = new Date(incident.resolved_at).getTime() - new Date(incident.created_at).getTime();
+    const diffSecs = Math.max(1, Math.round(diffMs / 1000));
+    if (diffSecs < 60) return `${diffSecs} sn`;
+    const diffMins = Math.round(diffSecs / 60);
+    return `${diffMins} dk`;
+  };
+
+  const mttrFormatted = calculateMttr();
+
+  const handleSendCommand = async (textToSend?: string) => {
+    const text = (textToSend || commandInput).trim();
+    if (!text || isSending || isResolved) return;
+
+    setIsSending(true);
+    setSendError(null);
+
+    try {
+      await sendWarRoomMessage(incident.id, text, "Nöbetçi Mühendis (On-Call SRE)");
+      setCommandInput("");
+      if (onIncidentUpdated) {
+        onIncidentUpdated();
+      }
+    } catch (err) {
+      setSendError(err instanceof Error ? err.message : "Mesaj gönderilirken hata oluştu.");
+    } finally {
+      setIsSending(false);
+      inputRef.current?.focus();
+    }
+  };
+
+  const handleRequestRevision = (planId: string) => {
+    const template = `@solver ${planId} planını şu şekilde revize et: `;
+    setCommandInput(template);
+    inputRef.current?.focus();
+  };
+
+  const warRoomMessages = incident.messages || [];
 
   return (
     <section className="flex-1 border-[1.5px] border-[#522D60] bg-[#FFFFFF] os-window-shadow flex flex-col h-full min-h-[580px] lg:max-h-[calc(100vh-80px)] select-none">
@@ -47,32 +127,39 @@ export function IncidentStream({ incident, onOpenSimulator }: IncidentStreamProp
       <div className="h-9 px-3 border-b-[1.5px] border-[#522D60] bg-[#FFFFFF] flex items-center justify-between font-mono text-[11px] shrink-0">
         <div className="flex items-center gap-2 font-bold text-[#522D60]">
           <span className="text-xs">◫</span>
-          <span className="tracking-wider">OLAY AKIŞI {incident.incident_code}</span>
+          <span className="tracking-wider">WAR ROOM // {incident.incident_code}</span>
         </div>
 
         <div className="flex items-center gap-2 text-[10px]">
-          <span
-            className={`inline-flex items-center gap-1 font-bold ${
-              isSev1
-                ? "text-[#D9383A]"
-                : isSev2
-                ? "text-[#F2A67B]"
-                : "text-[#522D60]"
-            }`}
-          >
+          {isResolved ? (
+            <span className="inline-flex items-center gap-1 font-bold text-[#1E8E5A] px-2 py-0.5 bg-[#EEFBF3] border border-[#1E8E5A]">
+              <span className="w-1.5 h-1.5 rounded-full bg-[#1E8E5A]" />
+              ÇÖZÜLDÜ
+            </span>
+          ) : (
             <span
-              className={`w-2 h-2 rounded-full ${
+              className={`inline-flex items-center gap-1 font-bold ${
                 isSev1
-                  ? "bg-[#D9383A] animate-pulse"
+                  ? "text-[#D9383A]"
                   : isSev2
-                  ? "bg-[#F2A67B]"
-                  : "bg-[#FFD38B]"
+                  ? "text-[#F2A67B]"
+                  : "text-[#522D60]"
               }`}
-            />
-            {incident.severity}
-          </span>
+            >
+              <span
+                className={`w-2 h-2 rounded-full ${
+                  isSev1
+                    ? "bg-[#D9383A] animate-pulse"
+                    : isSev2
+                    ? "bg-[#F2A67B]"
+                    : "bg-[#FFD38B]"
+                }`}
+              />
+              {incident.severity}
+            </span>
+          )}
 
-          {incident.sla_deadline && incident.status !== "resolved" && (
+          {incident.sla_deadline && !isResolved && (
             <>
               <span className="text-[#522D60]/30">|</span>
               <SlaCountdown
@@ -93,7 +180,7 @@ export function IncidentStream({ incident, onOpenSimulator }: IncidentStreamProp
         <div className="relative pl-6 sm:pl-8 space-y-6 before:content-[''] before:absolute before:left-2 before:top-2 before:bottom-2 before:w-[2px] before:bg-[#522D60]/20">
           {/* Card 1: RAW TELEMETRY (Soft Pink/Red Tint) */}
           <div className="relative space-y-1.5">
-            {/* Timeline Node Dot & Header */}
+            {/* Timeline Node */}
             <div className="flex items-center gap-2 font-mono text-[10px] -ml-6 sm:-ml-8">
               <span className="w-4 h-4 rounded-full bg-[#FFFFFF] border-2 border-[#D9383A] flex items-center justify-center shrink-0 z-10">
                 <span className="w-1.5 h-1.5 bg-[#D9383A] rounded-full" />
@@ -114,7 +201,15 @@ export function IncidentStream({ incident, onOpenSimulator }: IncidentStreamProp
                   </h3>
                 </div>
                 {incident.severity && (
-                  <span className="px-1.5 py-0.2 bg-[#D9383A] text-[#FFFFFF] font-mono text-[9px] font-bold border border-[#522D60]">
+                  <span
+                    className={`px-1.5 py-0.2 font-mono text-[9px] font-bold border border-[#522D60] ${
+                      isSev1
+                        ? "bg-[#D9383A] text-[#FFFFFF]"
+                        : isSev2
+                        ? "bg-[#F2A67B] text-[#522D60]"
+                        : "bg-[#FFD38B] text-[#522D60]"
+                    }`}
+                  >
                     {incident.severity}
                   </span>
                 )}
@@ -158,7 +253,7 @@ export function IncidentStream({ incident, onOpenSimulator }: IncidentStreamProp
             </div>
           </div>
 
-          {/* Card 2: GEMINI AI SRE BOT (Soft Lavender Tint) */}
+          {/* Card 2: AI TRIAGE & HYPOTHESIS (Soft Lavender Tint) */}
           <div className="relative space-y-1.5">
             <div className="flex items-center gap-2 font-mono text-[10px] -ml-6 sm:-ml-8">
               <span className="w-4 h-4 rounded-full bg-[#FFFFFF] border-2 border-[#522D60] flex items-center justify-center shrink-0 z-10">
@@ -166,7 +261,7 @@ export function IncidentStream({ incident, onOpenSimulator }: IncidentStreamProp
               </span>
               <span className="font-bold text-[#80426E] tabular-nums">{timeStr}</span>
               <span className="px-1.5 py-0.2 bg-[#F6F5FA] border border-[#522D60] text-[#522D60] font-bold tracking-wider">
-                GEMINI AI SRE AJANI
+                @SOLVER AI SRE AJANI
               </span>
             </div>
 
@@ -179,11 +274,10 @@ export function IncidentStream({ incident, onOpenSimulator }: IncidentStreamProp
                   </span>
                 </div>
                 <span className="px-1.5 py-0.2 bg-[#522D60] text-[#FFFFFF] font-mono text-[9px] font-bold border border-[#522D60]">
-                  AI ANALİZİ
+                  AI TRIAGE
                 </span>
               </div>
 
-              {/* Business Impact Reasoning */}
               {incident.reasoning && (
                 <div className="space-y-0.5">
                   <div className="font-mono text-[9px] font-bold text-[#80426E] uppercase">
@@ -195,7 +289,6 @@ export function IncidentStream({ incident, onOpenSimulator }: IncidentStreamProp
                 </div>
               )}
 
-              {/* Root Cause Hypothesis */}
               {incident.hypothesis && (
                 <div className="space-y-0.5 bg-[#FFFFFF] p-2 border border-[#522D60]/20">
                   <div className="font-mono text-[9px] font-bold text-[#522D60] uppercase">
@@ -240,7 +333,7 @@ export function IncidentStream({ incident, onOpenSimulator }: IncidentStreamProp
 
               <p className="font-sans text-[11px] text-[#522D60]/90 leading-relaxed">
                 {incident.autonomy_mode === "manual_command_only"
-                  ? "Yüksek etkili kriz nedeniyle otonom müdahale kilitlendi. Nöbetçi Mühendis ve Takım Lideri çağrıldı; 15 dakikalık SLA sayacı başlatıldı."
+                  ? "Kritik SEV-1 krizi nedeniyle izinsiz otonom müdahale kilitlendi. @solver tarafından sunulan implementasyon planları nöbetçi mühendisin tek tıkla onayıyla veya sohbet yönergeleriyle icra edilir."
                   : incident.autonomy_mode === "approval_required"
                   ? "Önemli işlev bozulması nedeniyle doğrudan müdahale kilitlendi. Nöbetçi Mühendisin eylem kartını onaylaması bekleniyor."
                   : "Düşük riskli operasyon. Ajan insan onayı beklemeksizin müdahaleyi tam otonom icra etme yetkisine sahiptir."}
@@ -248,127 +341,231 @@ export function IncidentStream({ incident, onOpenSimulator }: IncidentStreamProp
             </div>
           </div>
 
-          {/* Card 4: ACTION PLAN BLUEPRINT (2-Column White Card) */}
-          {plan && (
+          {/* 3. WAR ROOM COLLABORATIVE FEED (Messages, Plans & Diagnostics) */}
+          {warRoomMessages.length > 0 ? (
+            warRoomMessages.map((msg) => {
+              const msgDate = new Date(msg.created_at);
+              const msgTime = msgDate.toLocaleTimeString();
+
+              // Type A: Action Card / Implementation Plan
+              if (msg.message_type === "action_card") {
+                return (
+                  <ActionCard
+                    key={msg.id}
+                    incident={incident}
+                    message={msg}
+                    onActionComplete={onIncidentUpdated}
+                    onRequestRevision={handleRequestRevision}
+                  />
+                );
+              }
+
+              // Type B: System Diagnostic Terminal Box
+              if (msg.message_type === "system_diagnostic") {
+                return (
+                  <div key={msg.id} className="relative space-y-1.5">
+                    <div className="flex items-center gap-2 font-mono text-[10px] -ml-6 sm:-ml-8">
+                      <span className="w-4 h-4 rounded-full bg-[#FFFFFF] border-2 border-[#1E8E5A] flex items-center justify-center shrink-0 z-10">
+                        <span className="w-1.5 h-1.5 bg-[#1E8E5A] rounded-full" />
+                      </span>
+                      <span className="font-bold text-[#80426E] tabular-nums">{msgTime}</span>
+                      <span className="px-1.5 py-0.2 bg-[#EEFBF3] border border-[#1E8E5A] text-[#1E8E5A] font-bold tracking-wider">
+                        @SOLVER SİSTEM TANI RAPORU
+                      </span>
+                    </div>
+
+                    <div className="border-[1.5px] border-[#522D60] bg-[#1A1024] p-3 space-y-2 os-btn-shadow">
+                      <div className="flex items-center justify-between border-b border-white/20 pb-1.5">
+                        <span className="font-mono text-[10px] font-bold text-[#8DFFA9] flex items-center gap-1.5">
+                          <span>&gt;_</span>
+                          <span>DIAGNOSTIC &amp; TELEMETRY OUTPUT</span>
+                        </span>
+                        <span className="font-mono text-[9px] text-white/50">PostgreSQL / Redis Engine</span>
+                      </div>
+                      <pre className="text-[10px] font-mono text-[#8DFFA9] leading-tight overflow-x-auto max-h-48 whitespace-pre-wrap">
+                        {msg.content}
+                      </pre>
+                    </div>
+                  </div>
+                );
+              }
+
+              // Type C: Engineer Message
+              if (msg.sender_type === "engineer") {
+                return (
+                  <div key={msg.id} className="relative space-y-1.5">
+                    <div className="flex items-center gap-2 font-mono text-[10px] -ml-6 sm:-ml-8">
+                      <span className="w-4 h-4 rounded-full bg-[#FFFFFF] border-2 border-[#522D60] flex items-center justify-center shrink-0 z-10">
+                        <span className="w-1.5 h-1.5 bg-[#522D60] rounded-full" />
+                      </span>
+                      <span className="font-bold text-[#80426E] tabular-nums">{msgTime}</span>
+                      <span className="px-1.5 py-0.2 bg-[#522D60] text-[#FFFFFF] font-mono text-[10px] font-bold">
+                        👨‍💻 {msg.sender_name.toUpperCase()}
+                      </span>
+                    </div>
+
+                    <div className="border-[1.5px] border-[#522D60] bg-[#FAF6F2] p-3 space-y-1 os-btn-shadow-sm">
+                      <p className="font-sans text-[12px] text-[#522D60] font-medium leading-relaxed">
+                        {msg.content}
+                      </p>
+                    </div>
+                  </div>
+                );
+              }
+
+              // Type D: @solver Text Message
+              return (
+                <div key={msg.id} className="relative space-y-1.5">
+                  <div className="flex items-center gap-2 font-mono text-[10px] -ml-6 sm:-ml-8">
+                    <span className="w-4 h-4 rounded-full bg-[#FFFFFF] border-2 border-[#80426E] flex items-center justify-center shrink-0 z-10">
+                      <span className="w-1.5 h-1.5 bg-[#80426E] rounded-full" />
+                    </span>
+                    <span className="font-bold text-[#80426E] tabular-nums">{msgTime}</span>
+                    <span className="px-1.5 py-0.2 bg-[#80426E] text-[#FFFFFF] font-mono text-[10px] font-bold">
+                      ✦ @SOLVER
+                    </span>
+                  </div>
+
+                  <div className="border-[1.5px] border-[#80426E]/40 bg-[#F6F5FA] p-3 space-y-1.5 os-btn-shadow-sm">
+                    <p className="font-sans text-[12px] text-[#522D60] leading-relaxed whitespace-pre-line">
+                      {msg.content}
+                    </p>
+                  </div>
+                </div>
+              );
+            })
+          ) : (
+            /* Fallback single action card if messages empty */
+            <ActionCard
+              incident={incident}
+              onActionComplete={onIncidentUpdated}
+              onRequestRevision={handleRequestRevision}
+            />
+          )}
+
+          {/* Final Resolution Summary Card when resolved */}
+          {isResolved && (
             <div className="relative space-y-1.5">
               <div className="flex items-center gap-2 font-mono text-[10px] -ml-6 sm:-ml-8">
-                <span className="w-4 h-4 rounded-full bg-[#FFFFFF] border-2 border-[#522D60] flex items-center justify-center shrink-0 z-10">
-                  <span className="w-1.5 h-1.5 bg-[#522D60] rounded-full" />
+                <span className="w-4 h-4 rounded-full bg-[#FFFFFF] border-2 border-[#1E8E5A] flex items-center justify-center shrink-0 z-10">
+                  <span className="w-1.5 h-1.5 bg-[#1E8E5A] rounded-full" />
                 </span>
-                <span className="font-bold text-[#80426E] tabular-nums">{timeStr}</span>
-                <span className="px-1.5 py-0.2 bg-[#FFFFFF] border border-[#522D60] text-[#522D60] font-bold tracking-wider">
-                  EYLEM PLANI
+                <span className="font-bold text-[#1E8E5A] tabular-nums">
+                  {incident.resolved_at ? new Date(incident.resolved_at).toLocaleTimeString() : timeStr}
+                </span>
+                <span className="px-1.5 py-0.2 bg-[#EEFBF3] border border-[#1E8E5A] text-[#1E8E5A] font-bold tracking-wider">
+                  ÇÖZÜM DOĞRULAMASI
                 </span>
               </div>
 
-              <div className="border-[1.5px] border-[#522D60] bg-[#FFFFFF] p-3 space-y-3 os-btn-shadow">
-                {/* Header Row */}
-                <div className="flex items-center justify-between border-b border-[#522D60]/20 pb-2">
-                  <div className="flex items-center gap-2 font-mono text-xs">
-                    <span className="text-[#522D60] text-sm">📋</span>
-                    <span className="font-bold text-[#522D60]">
-                      {plan.plan_id || "PLAN #01"}: {plan.title || "Sistem Müdahalesi"}
-                    </span>
+              <div className="border-[1.5px] border-[#1E8E5A] bg-[#EEFBF3] p-3.5 space-y-2.5 os-btn-shadow">
+                <div className="flex items-center justify-between border-b border-[#1E8E5A]/30 pb-2">
+                  <div className="flex items-center gap-2 font-mono text-xs font-bold text-[#1E8E5A]">
+                    <span>✓</span>
+                    <span>OLAY KAPATILDI — SİSTEM OPERASYONEL</span>
                   </div>
-                  <span className="px-1.5 py-0.2 bg-[#FAF6F2] text-[#522D60] font-mono text-[9px] font-bold border border-[#522D60]">
-                    İCRAYA HAZIR
+                  <span className="px-2 py-0.5 bg-[#1E8E5A] text-[#FFFFFF] font-mono text-[9px] font-bold border border-[#522D60]">
+                    RESOLVED
                   </span>
                 </div>
 
-                {/* 2-Column Split: Steps (Left) + Meta/Button (Right) */}
-                <div className="grid grid-cols-1 md:grid-cols-12 gap-3 items-center">
-                  {/* Left Column: Numbered Steps */}
-                  <div className="md:col-span-7 space-y-1.5 font-mono text-[11px]">
-                    {plan.steps && plan.steps.length > 0 ? (
-                      plan.steps.map((st: string, idx: number) => (
-                        <div key={idx} className="flex items-start gap-2 bg-[#FAF6F2] p-1.5 border border-[#522D60]/20">
-                          <span className="w-4 h-4 shrink-0 bg-[#522D60] text-[#FFFFFF] rounded-full flex items-center justify-center text-[9px] font-bold">
-                            {idx + 1}
-                          </span>
-                          <span className="text-[#522D60] leading-snug">{st}</span>
-                        </div>
-                      ))
-                    ) : (
-                      <div className="text-xs text-[#80426E]">Adım detayları hazırlanıyor...</div>
-                    )}
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 font-mono text-[11px] text-[#522D60]">
+                  <div className="bg-[#FFFFFF] p-2 border border-[#1E8E5A]/30">
+                    <span className="text-[9px] text-[#80426E] uppercase block">Çözüm Modeli:</span>
+                    <strong className="text-[11px] text-[#1E8E5A]">
+                      {isSev3 ? "Yol A (Tam Otonom)" : isSev2 ? "Yol B (Tek Tık Onay)" : "Yol C (@solver War Room)"}
+                    </strong>
                   </div>
-
-                  {/* Right Column: Meta + Big CTA Button */}
-                  <div className="md:col-span-5 md:border-l md:border-[#522D60]/20 md:pl-3 space-y-3 font-mono text-[11px]">
-                    <div className="space-y-1 text-[10px] text-[#80426E]">
-                      <div className="flex justify-between">
-                        <span>Tahmini Süre:</span>
-                        <strong className="text-[#522D60]">10-15 dk</strong>
-                      </div>
-                      <div className="flex justify-between">
-                        <span>Etki Seviyesi:</span>
-                        <strong className="text-[#522D60]">Yüksek</strong>
-                      </div>
-                      <div className="flex justify-between">
-                        <span>Risk Durumu:</span>
-                        <strong className="text-[#D9383A]">
-                          {(plan.risk_level || "orta").toUpperCase()}
-                        </strong>
-                      </div>
-                    </div>
-
-                    <button
-                      type="button"
-                      disabled
-                      className="w-full py-2 px-3 bg-[#F2A67B] text-[#522D60] border-[1.5px] border-[#522D60] font-mono font-bold text-xs os-btn-shadow cursor-not-allowed opacity-85 select-none"
-                      title="Modül 4 ile tek tıkla onaylama ve icra motoru bağlanacaktır"
-                    >
-                      [ ONAYLA VE UYGULA ]
-                    </button>
+                  <div className="bg-[#FFFFFF] p-2 border border-[#1E8E5A]/30">
+                    <span className="text-[9px] text-[#80426E] uppercase block">Çözüm Süresi (MTTR):</span>
+                    <strong className="text-[11px] text-[#522D60]">{mttrFormatted || "< 10 sn"}</strong>
+                  </div>
+                  <div className="bg-[#FFFFFF] p-2 border border-[#1E8E5A]/30">
+                    <span className="text-[9px] text-[#80426E] uppercase block">Servis Durumu:</span>
+                    <strong className="text-[11px] text-[#1E8E5A]">OPERATIONAL (ÇALIŞIYOR)</strong>
                   </div>
                 </div>
+
+                <p className="font-sans text-[11px] text-[#522D60]/90 leading-tight">
+                  Tüm telemetri kontrolleri ve sentetik sağlık sorguları başarıyla tamamlandı. {incident.service?.name} servisi kesintisiz hizmet vermektedir.
+                </p>
               </div>
             </div>
           )}
 
-          {/* Subsequent Events & Timeline nodes */}
-          {incident.events && incident.events.length > 4 && (
-            incident.events.slice(4).map((ev) => (
-              <div key={ev.id} className="relative space-y-1">
-                <div className="flex items-center gap-2 font-mono text-[10px] -ml-6 sm:-ml-8">
-                  <span className="w-4 h-4 rounded-full bg-[#FFFFFF] border-2 border-[#522D60] flex items-center justify-center shrink-0 z-10">
-                    <span className="w-1.5 h-1.5 bg-[#522D60] rounded-full" />
-                  </span>
-                  <span className="font-bold text-[#80426E] tabular-nums">
-                    {new Date(ev.occurred_at).toLocaleTimeString()}
-                  </span>
-                  <span className="px-1.5 py-0.2 bg-[#FAF6F2] border border-[#522D60] text-[#522D60] font-bold">
-                    {ev.actor.toUpperCase()}
-                  </span>
-                </div>
-
-                <div className="bg-[#FAF6F2] border border-[#522D60]/30 p-2 font-mono text-[11px] text-[#522D60]">
-                  <strong>{ev.title}:</strong> {ev.details}
-                </div>
-              </div>
-            ))
-          )}
+          {/* Anchor for auto-scroll */}
+          <div ref={streamEndRef} />
         </div>
       </div>
 
-      {/* 3. Pinned Bottom Command Bar */}
-      <div className="border-t-[1.5px] border-[#522D60] bg-[#FAF6F2] p-2 sm:p-2.5 flex items-center gap-2 font-mono shrink-0">
-        <div className="w-6 h-6 shrink-0 bg-[#522D60] text-[#FFFFFF] border border-[#522D60] flex items-center justify-center text-xs font-bold select-none">
-          &gt;_
-        </div>
-        <input
-          type="text"
-          disabled
-          placeholder='Bir talimat, komut veya mesaj yazın... (Örn: "bağlantı havuzunu kontrol et", "işlemi sonlandır")'
-          className="flex-1 bg-[#FFFFFF] border-[1.5px] border-[#522D60] px-3 py-1.5 text-[11px] text-[#522D60]/60 cursor-not-allowed select-none focus:outline-none"
-        />
-        <button
-          type="button"
-          disabled
-          className="bg-[#522D60] text-[#FFFFFF] px-4 py-1.5 border-[1.5px] border-[#522D60] font-mono text-[11px] font-bold opacity-75 cursor-not-allowed select-none"
+      {/* 4. Active Command Bar with Quick @solver Chips */}
+      <div className="border-t-[1.5px] border-[#522D60] bg-[#FAF6F2] p-2 sm:p-2.5 space-y-2 shrink-0">
+        {sendError && (
+          <div className="text-[10px] font-mono text-[#D9383A] bg-[#FDF2F2] p-1.5 border border-[#D9383A]">
+            [HATA] {sendError}
+          </div>
+        )}
+
+        {/* Quick @solver Prompt Chips */}
+        {!isResolved && (
+          <div className="flex items-center gap-1.5 overflow-x-auto pb-1 text-[10px] font-mono scrollbar-none">
+            <span className="text-[#80426E] font-bold shrink-0 text-[9px] uppercase">
+              HIZLI TALİMAT:
+            </span>
+            {QUICK_PROMPTS.map((qp, idx) => (
+              <button
+                key={idx}
+                type="button"
+                onClick={() => handleSendCommand(qp.prompt)}
+                disabled={isSending}
+                className="shrink-0 px-2 py-0.5 bg-[#FFFFFF] hover:bg-[#FFD38B] text-[#522D60] border border-[#522D60]/40 font-mono text-[10px] font-semibold cursor-pointer transition-none disabled:opacity-50"
+              >
+                {qp.label}
+              </button>
+            ))}
+          </div>
+        )}
+
+        {/* Command Input Row */}
+        <form
+          onSubmit={(e) => {
+            e.preventDefault();
+            handleSendCommand();
+          }}
+          className="flex items-center gap-2 font-mono"
         >
-          [ GÖNDER ▷ ]
-        </button>
+          <div className="w-6 h-6 shrink-0 bg-[#522D60] text-[#FFFFFF] border border-[#522D60] flex items-center justify-center text-xs font-bold select-none">
+            &gt;_
+          </div>
+
+          <input
+            ref={inputRef}
+            type="text"
+            value={commandInput}
+            onChange={(e) => setCommandInput(e.target.value)}
+            disabled={isResolved || isSending}
+            placeholder={
+              isResolved
+                ? "Olay çözüldü — War Room arşivlendi."
+                : isSending
+                ? "@solver düşünüyor ve yanıt hazırlıyor..."
+                : "@solver'a bir talimat verin veya soru sorun... (örn: '@solver hatayı açıkla' veya '@solver yeni bir kurtarma planı hazırla')"
+            }
+            className="flex-1 bg-[#FFFFFF] border-[1.5px] border-[#522D60] px-3 py-1.5 text-[11px] text-[#522D60] focus:outline-none disabled:bg-[#FAF6F2] disabled:text-[#522D60]/50"
+          />
+
+          <button
+            type="submit"
+            disabled={isResolved || isSending || !commandInput.trim()}
+            className="bg-[#522D60] hover:bg-[#80426E] text-[#FFFFFF] px-4 py-1.5 border-[1.5px] border-[#522D60] font-mono text-[11px] font-bold disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer select-none transition-none flex items-center gap-1.5"
+          >
+            {isSending ? (
+              <span>⏳ YANITLANIYOR...</span>
+            ) : (
+              <span>[ GÖNDER ▷ ]</span>
+            )}
+          </button>
+        </form>
       </div>
     </section>
   );

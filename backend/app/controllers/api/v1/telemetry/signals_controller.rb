@@ -48,10 +48,23 @@ module Api
               autonomy_mode: incident.autonomy_mode,
               escalation_target: incident.escalation_target,
               sla_deadline: incident.sla_deadline&.iso8601,
+              resolved_at: incident.resolved_at&.iso8601,
               reasoning: incident.reasoning,
               hypothesis: incident.hypothesis,
               recommended_action_plan: incident.recommended_action_plan,
               created_at: incident.created_at.iso8601,
+              messages: incident.war_room_messages.map do |m|
+                {
+                  id: m.id,
+                  sender_type: m.sender_type,
+                  sender_name: m.sender_name,
+                  content: m.content,
+                  message_type: m.message_type,
+                  action_card_payload: m.action_card_payload,
+                  action_status: m.action_status,
+                  created_at: m.created_at.iso8601
+                }
+              end,
               events: incident.incident_events.order(occurred_at: :asc, id: :asc).map do |ev|
                 {
                   id: ev.id,

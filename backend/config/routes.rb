@@ -4,7 +4,13 @@ Rails.application.routes.draw do
   namespace :api do
     namespace :v1 do
       resources :services, only: [:index, :show]
-      resources :incidents, only: [:index, :show]
+      resources :incidents, only: [:index, :show] do
+        member do
+          post :approve_plan
+          post :reject_plan
+          post :messages, to: "incidents#create_message"
+        end
+      end
 
       namespace :telemetry do
         post "signals", to: "signals#create"

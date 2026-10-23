@@ -63,10 +63,10 @@ export function IncidentSidebar({
       <div className="h-9 px-3 border-b-[1.5px] border-[#522D60] bg-[#FFFFFF] flex items-center justify-between font-mono text-[11px]">
         <div className="flex items-center gap-2 font-bold text-[#522D60]">
           <span className="text-xs">☰</span>
-          <span className="tracking-wider">AKTİF OLAYLAR</span>
+          <span className="tracking-wider">OLAY KUYRUĞU</span>
         </div>
-        <span className="px-1.5 py-0.2 bg-[#FAF6F2] border border-[#522D60] font-bold text-[#522D60]">
-          {incidents.length}
+        <span className="px-1.5 py-0.2 bg-[#FAF6F2] border border-[#522D60] font-bold text-[#522D60] text-[10px]">
+          {incidents.filter((i) => i.status !== "resolved").length} Aktif / {incidents.length} Toplam
         </span>
       </div>
 
@@ -170,7 +170,7 @@ export function IncidentSidebar({
                     : "bg-[#FFFFFF] border-transparent hover:bg-[#FAF6F2]"
                 }`}
               >
-                {/* Row 1: Dot + Code + Severity Badge + Timestamp */}
+                {/* Row 1: Dot + Code + Severity Badge + Status Tag + Timestamp */}
                 <div className="flex items-center justify-between gap-1 mb-1 font-mono text-[10px]">
                   <div className="flex items-center gap-1.5 min-w-0">
                     <span className={`w-2 h-2 rounded-full shrink-0 ${dotColor}`} />
@@ -182,6 +182,19 @@ export function IncidentSidebar({
                     >
                       {inc.severity || "SEV-?"}
                     </span>
+                    {isResolved ? (
+                      <span className="text-[#1E8E5A] text-[9px] font-bold truncate">
+                        {inc.severity === "SEV-3" ? "· OTONOM" : "· ÇÖZÜLDÜ"}
+                      </span>
+                    ) : isSev2 ? (
+                      <span className="text-[#F2A67B] text-[9px] font-bold animate-pulse truncate">
+                        · ONAY
+                      </span>
+                    ) : isSev1 ? (
+                      <span className="text-[#D9383A] text-[9px] font-bold animate-pulse truncate">
+                        · KRİZ
+                      </span>
+                    ) : null}
                   </div>
 
                   <span className="text-[#80426E] text-[10px] shrink-0">

@@ -23,4 +23,19 @@ class Service < ApplicationRecord
   def active_incident
     incidents.where.not(status: "resolved").order(created_at: :desc).first
   end
+
+  def recalculate_status!
+    active_severities = incidents.active.pluck(:severity)
+    target_status =
+      if active_severities.include?("SEV-1")
+        "outage"
+      elsif active_severities.include?("SEV-2")
+        "degraded"
+      else
+        "operational"
+      end
+
+    update!(status: target_status) if status != target_status
+    target_status
+  end
 end

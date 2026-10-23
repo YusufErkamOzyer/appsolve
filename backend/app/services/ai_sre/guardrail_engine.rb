@@ -14,6 +14,10 @@ module AiSre
       new(incident).authorize_approved_plan!(approved_by: approved_by)
     end
 
+    def self.authorize_engineer_command!(incident, engineer_name: "on_call_engineer")
+      new(incident).authorize_engineer_command!(engineer_name: engineer_name)
+    end
+
     def initialize(incident)
       @incident = incident
       @service = incident.service
@@ -53,19 +57,39 @@ module AiSre
     end
 
     def authorize_approved_plan!(approved_by: "on_call_engineer")
-      if @incident.autonomy_mode == "manual_command_only"
+      if approved_by.blank?
         @incident.incident_events.create!(
           event_type: "guardrail_blocked",
           actor: "guardrail_engine",
-          title: "GÜVENLİK KİLİDİ: SEV-1 İçin Yalnızca Doğrudan Mühendis Komutu Kabul Edilir",
-          details: "SEV-1 olaylarında tek tıkla şablon onaylama modu devre dışıdır. Mühendisin War Room üzerinden adım adım talimat vermesi şarttır.",
+          title: "GÜVENLİK KİLİDİ: İsimsiz/Yetkisiz Onay Reddedildi",
+          details: "İmplementasyon planları ancak yetkili bir nöbetçi mühendisin açık onayıyla yürütülebilir.",
           occurred_at: Time.current
         )
 
-        raise UnauthorizedActionError,
-              "Guardrail ihlali: SEV-1 krizinde tek tıkla otomatik plan çalıştırılamaz. Tam güvenlik modu devrede!"
+        raise UnauthorizedActionError, "Guardrail ihlali: Onaylayan mühendis bilgisi zorunludur!"
       end
 
+      if @incident.autonomy_mode == "manual_command_only"
+        @incident.incident_events.create!(
+          event_type: "guardrail_authorized",
+          actor: "guardrail_engine",
+          title: "GÜVENLİK KİLİDİ: Mühendis Doğrudan Onayı Yetkilendirildi (SEV-1)",
+          details: "#{approved_by} tarafından @solver implementasyon planı incelendi ve doğrudan icra yetkisi verildi.",
+          occurred_at: Time.current
+        )
+      end
+
+      true
+    end
+
+    def authorize_engineer_command!(engineer_name: "on_call_engineer")
+      @incident.incident_events.create!(
+        event_type: "guardrail_authorized",
+        actor: "guardrail_engine",
+        title: "GÜVENLİK KİLİDİ: Mühendis Doğrudan Komutu Yetkilendirildi",
+        details: "#{engineer_name} tarafından verilen doğrudan komut icraya alındı.",
+        occurred_at: Time.current
+      )
       true
     end
 

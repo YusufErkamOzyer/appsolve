@@ -137,6 +137,7 @@ export default function CommandWorkstationPage() {
         <IncidentStream
           incident={selectedIncident}
           onOpenSimulator={() => setIsSimulatorOpen(true)}
+          onIncidentUpdated={loadData}
         />
       </main>
 

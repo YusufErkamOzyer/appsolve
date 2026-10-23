@@ -40,14 +40,36 @@ export interface RecommendedActionPlan {
   steps?: string[];
 }
 
+export type ActionStatus = "pending" | "autonomous_executed" | "executed" | "rejected" | "locked";
+
+export interface ActionCardPayload {
+  plan_id?: string;
+  title?: string;
+  tool_name?: string;
+  risk_level?: "low" | "medium" | "high" | string;
+  hypothesis?: string | null;
+  reasoning?: string | null;
+  steps?: string[];
+  terminal_output?: string;
+  verification_summary?: string;
+  executed_at?: string;
+  approved_by?: string;
+  rejected_by?: string;
+  rejection_reason?: string;
+  autonomous?: boolean;
+  estimated_duration?: string;
+  impact_scope?: string;
+  guardrail_status?: string;
+}
+
 export interface WarRoomMessage {
   id: number;
   sender_type: "gemini_ai_agent" | "engineer" | "system";
   sender_name: string;
   content: string;
   message_type: "text" | "action_card" | "system_diagnostic";
-  action_card_payload?: Record<string, unknown>;
-  action_status?: string | null;
+  action_card_payload?: ActionCardPayload;
+  action_status?: ActionStatus | null;
   created_at: string;
 }
 
@@ -83,6 +105,7 @@ export interface Incident {
     status: string;
   };
   events: IncidentEvent[];
+  messages?: WarRoomMessage[];
 }
 
 export interface IncidentDetail extends Incident {
@@ -168,4 +191,71 @@ export async function resetSystem(): Promise<{ status: string; message: string }
     throw new Error(`Failed to reset system: ${res.statusText}`);
   }
   return res.json();
+}
+
+export interface PlanActionResponse {
+  status: string;
+  message: string;
+  incident: IncidentDetail;
+}
+
+export interface SendMessageResponse {
+  status: string;
+  message: string;
+  engineer_message: WarRoomMessage;
+  incident: IncidentDetail;
+}
+
+export async function sendWarRoomMessage(
+  incidentId: number,
+  content: string,
+  senderName: string = "Nöbetçi Mühendis (On-Call SRE)"
+): Promise<SendMessageResponse> {
+  const res = await fetch(`${API_BASE}/incidents/${incidentId}/messages`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ content, sender_name: senderName })
+  });
+
+  const data = await res.json();
+  if (!res.ok) {
+    throw new Error(data.error || `Mesaj iletilemedi: ${res.statusText}`);
+  }
+  return data;
+}
+
+export async function approveIncidentPlan(
+  incidentId: number,
+  approvedBy: string = "Nöbetçi Mühendis (On-Call SRE)",
+  planId?: string
+): Promise<PlanActionResponse> {
+  const res = await fetch(`${API_BASE}/incidents/${incidentId}/approve_plan`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ approved_by: approvedBy, plan_id: planId })
+  });
+
+  const data = await res.json();
+  if (!res.ok) {
+    throw new Error(data.error || `Plan onaylanamadı: ${res.statusText}`);
+  }
+  return data;
+}
+
+export async function rejectIncidentPlan(
+  incidentId: number,
+  rejectedBy: string = "Nöbetçi Mühendis (On-Call SRE)",
+  reason?: string
+): Promise<PlanActionResponse> {
+  const res = await fetch(`${API_BASE}/incidents/${incidentId}/reject_plan`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ rejected_by: rejectedBy, reason: reason })
+  });
+
+  const data = await res.json();
+  if (!res.ok) {
+    throw new Error(data.error || `Plan reddedilemedi: ${res.statusText}`);
+  }
+  return data;
 }
