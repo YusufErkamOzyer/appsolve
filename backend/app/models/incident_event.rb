@@ -5,5 +5,5 @@ class IncidentEvent < ApplicationRecord
   validates :title, presence: true
   validates :occurred_at, presence: true
 
-  default_scope { order(occurred_at: :asc) }
+  default_scope { order(occurred_at: :asc, id: :asc) }
 end

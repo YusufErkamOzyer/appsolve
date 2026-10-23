@@ -27,16 +27,52 @@ export interface IncidentEvent {
   occurred_at: string;
 }
 
+export type EscalationTarget = "none" | "on_call_engineer" | "on_call_and_team_lead";
+export type AutonomyMode = "pending_triage" | "full_autonomy" | "approval_required" | "manual_command_only";
+export type IncidentSeverity = "SEV-1" | "SEV-2" | "SEV-3";
+export type IncidentStatus = "investigating" | "identified" | "monitoring" | "resolved";
+
+export interface RecommendedActionPlan {
+  plan_id?: string;
+  title?: string;
+  tool_name?: string;
+  risk_level?: "low" | "medium" | "high" | string;
+  steps?: string[];
+}
+
+export interface WarRoomMessage {
+  id: number;
+  sender_type: "gemini_ai_agent" | "engineer" | "system";
+  sender_name: string;
+  content: string;
+  message_type: "text" | "action_card" | "system_diagnostic";
+  action_card_payload?: Record<string, unknown>;
+  action_status?: string | null;
+  created_at: string;
+}
+
+export interface PostMortem {
+  summary: string;
+  root_cause: string;
+  duration_seconds: number;
+  mttr_formatted: string;
+  affected_services: string[];
+  action_items: string[];
+  generated_by: string;
+}
+
 export interface Incident {
   id: number;
   incident_code: string;
   title: string;
-  severity: "SEV-1" | "SEV-2" | "SEV-3" | null;
-  status: "investigating" | "identified" | "monitoring" | "resolved";
-  autonomy_mode: "pending_triage" | "full_autonomy" | "approval_required" | "manual_command_only";
-  escalation_target: string;
+  severity: IncidentSeverity | null;
+  status: IncidentStatus;
+  autonomy_mode: AutonomyMode;
+  escalation_target: EscalationTarget;
   hypothesis: string | null;
   reasoning: string | null;
+  recommended_action_plan?: RecommendedActionPlan | null;
+  raw_payload?: Record<string, unknown>;
   sla_deadline: string | null;
   resolved_at: string | null;
   created_at: string;
@@ -47,6 +83,11 @@ export interface Incident {
     status: string;
   };
   events: IncidentEvent[];
+}
+
+export interface IncidentDetail extends Incident {
+  messages: WarRoomMessage[];
+  post_mortem: PostMortem | null;
 }
 
 export interface ServicesResponse {
@@ -66,7 +107,7 @@ export interface TelemetrySignalPayload {
   service_slug: string;
   error_code: string;
   message: string;
-  severity?: "SEV-1" | "SEV-2" | "SEV-3";
+  severity?: IncidentSeverity;
   metrics?: Record<string, unknown>;
   metadata?: Record<string, unknown>;
 }
@@ -91,6 +132,17 @@ export async function fetchIncidents(): Promise<IncidentsResponse> {
   });
   if (!res.ok) {
     throw new Error(`Failed to fetch incidents: ${res.statusText}`);
+  }
+  return res.json();
+}
+
+export async function fetchIncident(id: number): Promise<IncidentDetail> {
+  const res = await fetch(`${API_BASE}/incidents/${id}`, {
+    cache: "no-store",
+    headers: { "Content-Type": "application/json" }
+  });
+  if (!res.ok) {
+    throw new Error(`Failed to fetch incident #${id}: ${res.statusText}`);
   }
   return res.json();
 }

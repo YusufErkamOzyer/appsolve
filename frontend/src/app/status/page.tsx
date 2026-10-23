@@ -22,8 +22,14 @@ export default function StatusPage() {
   }, []);
 
   useEffect(() => {
-    loadData();
-    const interval = setInterval(loadData, 3000);
+    const runSync = async () => {
+      await loadData();
+    };
+
+    void runSync();
+    const interval = setInterval(() => {
+      void runSync();
+    }, 3000);
     return () => clearInterval(interval);
   }, [loadData]);
 
