@@ -2,11 +2,8 @@
 
 import React, { useEffect, useState, useCallback, useRef, useMemo } from "react";
 import { OsNavbar } from "@/components/os/OsNavbar";
-import { HeaderBar } from "@/components/workstation/HeaderBar";
-import { IncidentQueue } from "@/components/workstation/IncidentQueue";
-import { WarRoomShell } from "@/components/workstation/WarRoomShell";
-import { TriagePanel } from "@/components/workstation/TriagePanel";
-import { IncidentTimeline } from "@/components/workstation/IncidentTimeline";
+import { IncidentSidebar } from "@/components/workstation/IncidentSidebar";
+import { IncidentStream } from "@/components/workstation/IncidentStream";
 import { SignalSimulatorModal } from "@/components/workstation/SignalSimulatorModal";
 import {
   fetchServices,
@@ -103,17 +100,20 @@ export default function CommandWorkstationPage() {
   );
 
   return (
-    <div className="flex flex-col min-h-screen">
+    <div className="flex flex-col min-h-screen bg-[#FAF6F2]">
+      {/* 1. Full-Width Single Dark Ink Top Bar */}
       <OsNavbar
         onResetComplete={loadData}
         onOpenSimulator={() => setIsSimulatorOpen(true)}
         activeSev1={hasActiveSev1}
+        services={servicesData?.services || []}
       />
 
-      <main className="max-w-[1440px] mx-auto w-full p-2.5 sm:p-4 space-y-3">
-        {/* Error Notification */}
+      {/* 2. Focused 2-Panel Master-Detail Workstation Layout */}
+      <main className="max-w-[1600px] mx-auto w-full p-2.5 sm:p-4 flex-1 flex flex-col lg:flex-row gap-4 items-stretch lg:overflow-hidden">
+        {/* API Error Callout if any */}
         {error && (
-          <div className="border-[1.5px] border-[#D9383A] bg-[#FFFFFF] p-2.5 font-mono text-xs text-[#D9383A] os-window-shadow flex items-center justify-between">
+          <div className="border-[1.5px] border-[#D9383A] bg-[#FFFFFF] p-2.5 font-mono text-xs text-[#D9383A] os-window-shadow flex items-center justify-between lg:col-span-12">
             <span>[UYARI] API Bağlantı Hatası: {error} (Port 3001 kontrol ediliyor...)</span>
             <button
               type="button"
@@ -125,41 +125,19 @@ export default function CommandWorkstationPage() {
           </div>
         )}
 
-        {/* 1. SEV-Sensitive Command Header & Microservices Health Strip */}
-        <HeaderBar
-          activeIncidents={activeIncidents}
-          selectedIncident={selectedIncident}
+        {/* Left Panel: AKTİF OLAYLAR (IncidentSidebar) */}
+        <IncidentSidebar
+          incidents={incidents}
+          selectedIncidentId={selectedIncident?.id || null}
           onSelectIncident={(inc) => setSelectedIncidentId(inc.id)}
-          services={servicesData?.services || []}
           onOpenSimulator={() => setIsSimulatorOpen(true)}
         />
 
-        {/* 2. 12-Column SRE Command Workstation Grid */}
-        <div className="grid grid-cols-1 lg:grid-cols-12 gap-3 items-start">
-          {/* Left Column (3 Columns): Incident Queue */}
-          <div className="lg:col-span-3">
-            <IncidentQueue
-              incidents={incidents}
-              selectedIncidentId={selectedIncident?.id || null}
-              onSelectIncident={(inc) => setSelectedIncidentId(inc.id)}
-              onOpenSimulator={() => setIsSimulatorOpen(true)}
-            />
-          </div>
-
-          {/* Center Column (5 Columns): War Room Diagnostic & Telemetry Shell */}
-          <div className="lg:col-span-5">
-            <WarRoomShell
-              incident={selectedIncident}
-              onOpenSimulator={() => setIsSimulatorOpen(true)}
-            />
-          </div>
-
-          {/* Right Column (4 Columns): AI Triage Hypothesis + Chronological Timeline */}
-          <div className="lg:col-span-4 space-y-3">
-            <TriagePanel incident={selectedIncident} />
-            <IncidentTimeline incident={selectedIncident} />
-          </div>
-        </div>
+        {/* Right Panel: OLAY AKIŞI (IncidentStream) */}
+        <IncidentStream
+          incident={selectedIncident}
+          onOpenSimulator={() => setIsSimulatorOpen(true)}
+        />
       </main>
 
       {/* External Telemetry Signal Injector Modal */}
