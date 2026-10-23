@@ -41,6 +41,11 @@ class RemediationServiceTest < ActiveSupport::TestCase
     events = incident.incident_events.pluck(:event_type)
     assert_includes events, "autonomous_remediation_executed"
     assert_includes events, "incident_resolved"
+
+    # Module 6: Otomatik Post-Mortem doğrulama
+    assert_not_nil incident.post_mortem
+    assert_not_empty incident.post_mortem.summary
+    assert_not_empty incident.post_mortem.root_cause
   end
 
   test "SEV-2 route_after_triage! creates pending action card without resolving" do
@@ -112,6 +117,11 @@ class RemediationServiceTest < ActiveSupport::TestCase
     assert_includes events, "plan_approved"
     assert_includes events, "remediation_executed"
     assert_includes events, "incident_resolved"
+
+    # Module 6: Otomatik Post-Mortem doğrulama
+    assert_not_nil incident.post_mortem
+    assert_not_empty incident.post_mortem.summary
+    assert_not_empty incident.post_mortem.action_items
   end
 
   test "SEV-2 reject_plan! marks card rejected and keeps incident open" do

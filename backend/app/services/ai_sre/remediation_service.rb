@@ -118,6 +118,9 @@ module AiSre
       @incident.update!(status: "resolved", resolved_at: Time.current)
       @service.recalculate_status! if @service.present?
 
+      # Otomatik Post-Mortem Raporu Üretimi (PostMortem 1.1)
+      AiSre::PostMortemGenerator.generate!(@incident)
+
       @incident.reload
     end
 
@@ -206,6 +209,9 @@ module AiSre
 
       @incident.update!(status: "resolved", resolved_at: Time.current)
       @service.recalculate_status! if @service.present?
+
+      # Otomatik Post-Mortem Raporu Üretimi (PostMortem 1.1)
+      AiSre::PostMortemGenerator.generate!(@incident)
     end
 
     # Yol B (SEV-2): Nöbetçi Mühendis İçin İnteraktif Eylem Kartı Hazırlığı

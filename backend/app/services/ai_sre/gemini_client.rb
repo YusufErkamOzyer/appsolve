@@ -94,6 +94,36 @@ module AiSre
       required: ["reply_text", "create_plan", "resolve_incident"]
     }.freeze
 
+    POST_MORTEM_SYSTEM_INSTRUCTION = <<~PROMPT.strip
+      Sen Appsolve platformunun kıdemli AI SRE (Site Reliability Engineering) Ajanısın.
+      Görevin: Çözüme kavuşturulmuş bir kriz/olay (incident) için resmi, kapsamlı ve profesyonel bir Post-Mortem (Olay Sonrası Analiz) raporu hazırlamak.
+
+      Rapor Formatı ve İçerik Gereksinimleri:
+      1. Yönetici Özeti (summary): Olayın ne zaman başladığını, hangi servisi ve kullanıcıları nasıl etkilediğini ve nasıl çözüldüğünü özetleyen 2-3 paragraflık berrak Türkçe açıklama.
+      2. Kök Neden Analizi (root_cause): Hatanın teknik tetikleyicisini, sistemdeki darboğazı, kilit veya önbellek mekanizmasını ve neden oluştuğunu detaylandıran derin teknik analiz.
+      3. Etkilenen Servisler (affected_services): Kesintiden doğrudan veya dolaylı etkilenen servislerin listesi (örn: ["Ödeme (checkout)", "Sepet (cart)"]).
+      4. Önleyici ve İyileştirici Aksiyonlar (action_items): Gelecekte benzer bir olayın yaşanmasını kesin olarak önleyecek 3-5 adet somut, uygulanabilir mühendislik aksiyon maddesi (örn: veritabanı timeout parametreleri, circuit breaker, replika konfigürasyonu, alarm eşikleri).
+
+      Çıktı Dili: Türkçe, tarafsız (blameless post-mortem kültürü), yüksek teknik yetkinlikte.
+    PROMPT
+
+    POST_MORTEM_RESPONSE_SCHEMA = {
+      type: "OBJECT",
+      properties: {
+        summary: { type: "STRING" },
+        root_cause: { type: "STRING" },
+        affected_services: {
+          type: "ARRAY",
+          items: { type: "STRING" }
+        },
+        action_items: {
+          type: "ARRAY",
+          items: { type: "STRING" }
+        }
+      },
+      required: ["summary", "root_cause", "affected_services", "action_items"]
+    }.freeze
+
     def initialize(api_key: ENV["GEMINI_API_KEY"], model: DEFAULT_MODEL)
       @api_key = api_key
       @model = model
@@ -122,6 +152,19 @@ module AiSre
         end
       else
         fallback_war_room_chat(incident: incident, message_content: message_content)
+      end
+    end
+
+    def generate_post_mortem(incident:)
+      if @api_key.present? && ENV["MOCK_AI"] != "true"
+        begin
+          call_gemini_post_mortem_api(incident: incident)
+        rescue StandardError => e
+          Rails.logger.warn("[AiSre::GeminiClient] Gemini Post-Mortem API çağrısı başarısız oldu (#{e.message}), deterministik yedek rapora geçiliyor.")
+          fallback_post_mortem(incident: incident)
+        end
+      else
+        fallback_post_mortem(incident: incident)
       end
     end
 
@@ -351,6 +394,121 @@ module AiSre
           reply_text: "Talimatınız alındı. @solver olarak emrinizdeyim. Bana hatanın kök nedenini detaylandırmamı söyleyebilir, yeni yönergelerle revize bir implementasyon planı hazırlamamı isteyebilir veya mevcut planı tek tıkla çalıştırabilirsiniz.",
           create_plan: false,
           resolve_incident: false
+        }.with_indifferent_access
+      end
+    end
+
+    def call_gemini_post_mortem_api(incident:)
+      url = URI("#{BASE_URL}/#{@model}:generateContent?key=#{@api_key}")
+      http = Net::HTTP.new(url.host, url.port)
+      http.use_ssl = true
+      http.read_timeout = 20
+      http.open_timeout = 5
+
+      request = Net::HTTP::Post.new(url.request_uri, { "Content-Type" => "application/json" })
+
+      events_summary = incident.incident_events.order(occurred_at: :asc).map do |ev|
+        "#{ev.occurred_at.strftime('%H:%M:%S')} [#{ev.actor}]: #{ev.title} - #{ev.details}"
+      end.join("\n")
+
+      messages_summary = incident.war_room_messages.order(created_at: :asc).map do |msg|
+        "#{msg.created_at.strftime('%H:%M:%S')} [#{msg.sender_name} (#{msg.message_type})]: #{msg.content.slice(0, 200)}"
+      end.join("\n")
+
+      prompt = <<~PROMPT
+        Aşağıdaki çözülmüş kriz/olay için kapsamlı ve profesyonel bir Post-Mortem raporu sentezle:
+        - Olay Kodu: #{incident.incident_code}
+        - Kritiklik Seviyesi: #{incident.severity}
+        - Servis: #{incident.service&.name} (#{incident.service&.slug})
+        - Başlık: #{incident.title}
+        - İlk Triage Hipotezi: #{incident.hypothesis}
+        - Başlangıç: #{incident.created_at}
+        - Çözüm: #{incident.resolved_at || Time.current}
+        - Ham Telemetri: #{incident.raw_payload&.to_json}
+
+        Olay Zaman Çizelgesi (Timeline Kayıtları):
+        #{events_summary.presence || "Kayıt yok"}
+
+        War Room Mesajlaşma ve Aksiyon Geçmişi:
+        #{messages_summary.presence || "Kayıt yok"}
+
+        Lütfen bu verileri sentezleyerek:
+        1. summary: Yönetici Özeti (kesintinin iş etkisi, müşteriye yansıması ve nasıl giderildiği).
+        2. root_cause: Kök Neden Analizi (teknik derinlikte hatanın kök sebebi).
+        3. affected_services: Etkilenen servis isimleri dizisi.
+        4. action_items: Gelecekte tekrarlanmasını önleyecek somut mühendislik iyileştirme adımları dizisi.
+        JSON formatında üret.
+      PROMPT
+
+      body = {
+        system_instruction: {
+          parts: [{ text: POST_MORTEM_SYSTEM_INSTRUCTION }]
+        },
+        contents: [
+          {
+            role: "user",
+            parts: [{ text: prompt }]
+          }
+        ],
+        generationConfig: {
+          responseMimeType: "application/json",
+          responseSchema: POST_MORTEM_RESPONSE_SCHEMA,
+          temperature: 0.1
+        }
+      }
+
+      request.body = body.to_json
+      response = http.request(request)
+
+      unless response.is_a?(Net::HTTPSuccess)
+        raise "Gemini API HTTP #{response.code}: #{response.body}"
+      end
+
+      parsed = JSON.parse(response.body)
+      text = parsed.dig("candidates", 0, "content", "parts", 0, "text")
+      raise "Gemini API metin içeriği boş." unless text
+
+      JSON.parse(text).with_indifferent_access
+    end
+
+    def fallback_post_mortem(incident:)
+      sev = incident.severity.to_s
+      slug = incident.service&.slug.to_s.downcase
+      created_time = incident.created_at.strftime("%H:%M:%S")
+
+      if sev == "SEV-1" || slug == "checkout"
+        {
+          summary: "QuickCart ödeme altyapısında saat #{created_time} itibarıyla ödeme ağ geçidinde kritik kilitlenme (deadlock) meydana gelmiştir. Ödeme servisindeki hata oranı %94'e fırlamış, 48 sipariş işlemi veritabanında askıda kalmış ve mobil müşterilerin ödeme akışı tamamen kesintiye uğramıştır. Nöbetçi mühendis ve Takım Lideri War Room'a dahil edilmiş, kilitli işlemler sonlandırılarak ve bağlantı havuzu sıfırlanarak sistem tamamen operasyonel duruma getirilmiştir.",
+          root_cause: "PostgreSQL üzerinde 'payment_records' tablosunda eşzamanlı iki farklı işlem dalının (yeni sipariş provizyonu ile bakiye düşümü) ters sırada satır kilidi (row lock) alması sonucu karşılıklı kilitlenme (deadlock) meydana gelmiştir. idle_in_transaction_session_timeout parametresinin tanımlı olmaması nedeniyle kilitli bağlantılar havuzda asılı kalmış ve yeni gelen tüm isteklere 504 Gateway Timeout yanıtı dönmüştür.",
+          affected_services: ["Ödeme (checkout)", "Sepet (cart)"],
+          action_items: [
+            "payment_records tablosundaki sorgu kilit sırasını deterministik hale getir (lock ordering refactoring).",
+            "PostgreSQL veritabanı idle_in_transaction_session_timeout parametresini 5000 ms'ye ayarla.",
+            "Ödeme ağ geçidi için 5 saniyeyi aşan isteklerde otomatik circuit-breaker tetiklenmesini sağla.",
+            "Veritabanı kilit bekleme sayısı 10'u aştığında PagerDuty SEV-1 acil alarm kuralı oluştur."
+          ]
+        }.with_indifferent_access
+      elsif sev == "SEV-2" || slug == "cart"
+        {
+          summary: "QuickCart sepet modülünde yeni açılan promo_v2 özellik bayrağı (feature flag) nedeniyle kupon hesaplama adımında NaN (Not a Number) hatası oluşmuştur. Etkilenen kullanıcı oranı %28'e ulaşmış, indirim kuponu kullanan müşteriler sipariş tamamlama adımına geçememiştir. Ajan tarafından hazırlanan eylem kartı nöbetçi mühendisin tek tıkla onayıyla uygulanmış, bayrak geri alınarak kupon önbelleği temizlenmiş ve servis ivedilikle normale döndürülmüştür.",
+          root_cause: "Redis üzerindeki kupon önbellek anahtar formatında yapılan şema değişikliği geriye dönük uyumsuzluk yaratmış; float parse işleminde geçersiz veri NaN üretmiştir. Tip denetiminin eksikliği nedeniyle sepet hesaplama servisi 500 hatası üretmiştir.",
+          affected_services: ["Sepet (cart)"],
+          action_items: [
+            "Redis kupon veri yapısı için sıkı JSON şema validatörü ve tip koruma katmanı ekle.",
+            "Özellik bayraklarının (feature flag) aşamalı açılışında (canary %5 -> %25 -> %100) otomatik geri alma eşikleri tanımla.",
+            "Sepet kupon doğrulama modülü için uçtan uca sentetik e2e test kapsamını %95'e çıkar."
+          ]
+        }.with_indifferent_access
+      else
+        {
+          summary: "Katalog servisinde ürün görsel önbellek (CDN edge cache) doluluğunun %90 eşiğini aşması nedeniyle bazı küçük resimlerin geç yüklenmesi şeklinde minör performans kaybı tespit edilmiştir. Ana satın alma ve oturum akışları kesintisiz çalışmıştır. Appsolve AI SRE Ajanı tam otonom yetkisini kullanarak insan müdahalesi gerekmeksizin önbelleği temizlemiş ve olay otomatik olarak kapatılmıştır.",
+          root_cause: "Kampanya dönemi öncesinde yüklenen yüksek çözünürlüklü banner görsellerinin katalog önbellek etiketinde bellek şişmesine yol açması ve LRU tahliye politikasının gecikmeli tetiklenmesi.",
+          affected_services: ["Katalog (catalog)"],
+          action_items: [
+            "CDN önbellek tahliye politikasını LRU eşiği %80 olacak şekilde yeniden yapılandır.",
+            "Katalog görsel yükleme servisindeki webp/avif otomatik sıkıştırma boru hattını optimize et.",
+            "CDN uç nokta bellek kullanım alarm eşiğini %85 seviyesine çek."
+          ]
         }.with_indifferent_access
       end
     end

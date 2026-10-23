@@ -2,12 +2,12 @@ module Api
   module V1
     class IncidentsController < ApplicationController
       def index
-        incidents = Incident.includes(:service, :incident_events, :war_room_messages).order(created_at: :desc).limit(50)
+        incidents = Incident.includes(:service, :incident_events, :war_room_messages, :post_mortem).order(created_at: :desc).limit(50)
 
         render json: {
           total_count: Incident.count,
           active_count: Incident.active.count,
-          incidents: incidents.map { |inc| serialize_incident(inc) }
+          incidents: incidents.map { |inc| serialize_incident(inc, full: true) }
         }
       end
 
@@ -100,6 +100,53 @@ module Api
         render json: { error: e.message }, status: :internal_server_error
       end
 
+      def regenerate_post_mortem
+        incident = Incident.includes(:service, :incident_events, :war_room_messages, :post_mortem).find(params[:id])
+        unless incident.status == "resolved"
+          return render json: { error: "Yalnızca çözülmüş olaylar için Post-Mortem raporu oluşturulabilir." }, status: :unprocessable_entity
+        end
+
+        pm = AiSre::PostMortemGenerator.generate!(incident, force_regenerate: true)
+
+        render json: {
+          status: "ok",
+          message: "Post-Mortem raporu AI ile başarıyla yeniden sentezlendi.",
+          post_mortem: {
+            summary: pm.summary,
+            root_cause: pm.root_cause,
+            duration_seconds: pm.duration_seconds,
+            mttr_formatted: pm.mttr_formatted,
+            affected_services: pm.affected_services,
+            action_items: pm.action_items,
+            generated_by: pm.generated_by,
+            created_at: pm.created_at.iso8601
+          },
+          incident: serialize_incident(incident.reload, full: true)
+        }, status: :ok
+      rescue ActiveRecord::RecordNotFound
+        render json: { error: "Incident not found" }, status: :not_found
+      rescue StandardError => e
+        render json: { error: e.message }, status: :internal_server_error
+      end
+
+      def export_post_mortem
+        incident = Incident.includes(:service, :post_mortem).find(params[:id])
+        unless incident.post_mortem.present?
+          return render json: { error: "Bu olay için henüz bir Post-Mortem raporu bulunmuyor." }, status: :not_found
+        end
+
+        markdown = incident.post_mortem.to_markdown
+        clean_code = incident.incident_code.gsub(/[^0-9A-Za-z_-]/, "")
+        filename = "post-mortem-#{clean_code}.md"
+
+        send_data markdown,
+                  filename: filename,
+                  type: "text/markdown; charset=utf-8",
+                  disposition: "attachment"
+      rescue ActiveRecord::RecordNotFound
+        render json: { error: "Incident not found" }, status: :not_found
+      end
+
       private
 
       def serialize_incident(inc, full: false)
@@ -145,20 +192,18 @@ module Api
               action_status: m.action_status,
               created_at: m.created_at.iso8601
             }
-          end
-        }
-
-        if full
-          data[:post_mortem] = inc.post_mortem ? {
+          end,
+          post_mortem: inc.post_mortem ? {
             summary: inc.post_mortem.summary,
             root_cause: inc.post_mortem.root_cause,
             duration_seconds: inc.post_mortem.duration_seconds,
             mttr_formatted: inc.post_mortem.mttr_formatted,
             affected_services: inc.post_mortem.affected_services,
             action_items: inc.post_mortem.action_items,
-            generated_by: inc.post_mortem.generated_by
+            generated_by: inc.post_mortem.generated_by,
+            created_at: inc.post_mortem.created_at.iso8601
           } : nil
-        end
+        }
 
         data
       end

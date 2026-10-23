@@ -183,8 +183,11 @@ export function IncidentSidebar({
                       {inc.severity || "SEV-?"}
                     </span>
                     {isResolved ? (
-                      <span className="text-[#1E8E5A] text-[9px] font-bold truncate">
-                        {inc.severity === "SEV-3" ? "· OTONOM" : "· ÇÖZÜLDÜ"}
+                      <span className="inline-flex items-center gap-1 text-[#1E8E5A] text-[9px] font-bold truncate">
+                        <span>{inc.severity === "SEV-3" ? "· OTONOM" : "· ÇÖZÜLDÜ"}</span>
+                        <span className="px-1 py-0.1 bg-[#EEFBF3] border border-[#1E8E5A] text-[#1E8E5A] text-[8px] font-mono">
+                          📄 POST-MORTEM
+                        </span>
                       </span>
                     ) : isSev2 ? (
                       <span className="text-[#F2A67B] text-[9px] font-bold animate-pulse truncate">
