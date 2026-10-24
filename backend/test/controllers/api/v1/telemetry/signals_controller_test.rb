@@ -83,4 +83,34 @@ class Api::V1::Telemetry::SignalsControllerTest < ActionDispatch::IntegrationTes
     assert_not_nil action_msg
     assert_equal "autonomous_executed", action_msg["action_status"]
   end
+
+  test "POST /api/v1/telemetry/signals bypasses AI when AI is disconnected (Token Saving Mode)" do
+    AiSre::AutomationConfig.ai_connected = false
+
+    payload = {
+      service_slug: "cart",
+      error_code: "ERR_COUPON_CALCULATION",
+      message: "Cannot read properties of undefined (reading 'multiplier')"
+    }
+
+    assert_no_difference("PostMortem.count") do
+      post api_v1_telemetry_signals_url, params: payload, as: :json
+    end
+
+    assert_response :created
+    json = JSON.parse(response.body)
+
+    assert_equal true, json["ai_automation_skipped"]
+    assert_includes json["message"], "Token Tasarrufu"
+    inc_data = json["incident"]
+    assert_equal "SEV-2", inc_data["severity"]
+    assert_equal "manual_command_only", inc_data["autonomy_mode"]
+    assert_equal "degraded", inc_data["service_status"]
+
+    events = inc_data["events"]
+    assert events.any? { |e| e["event_type"] == "ai_bypassed" }
+
+    # Re-enable AI
+    AiSre::AutomationConfig.ai_connected = true
+  end
 end

@@ -91,6 +91,9 @@ ${colors.bold}COMMANDS:${colors.reset}
                            • ${colors.blue}sev3${colors.reset} : Catalog Cache Bloat (12,000 keys, autonomous bridge purge)
   ${colors.bold}reset${colors.reset}                  Reset all chaos state, release locks, and purge cache
   ${colors.bold}status${colors.reset}                 Inspect live health, DB locks, cache pressure, and Appsolve incidents
+  ${colors.bold}ai-disconnect / disconnect${colors.reset} Disconnect AI automation (Token Saving Mode for mobile tests)
+  ${colors.bold}ai-connect / connect${colors.reset}    Reconnect AI automation (Autonomous triage & PR repair)
+  ${colors.bold}ai-status${colors.reset}              Check whether AI automation is currently connected or paused
   ${colors.bold}verify${colors.reset}                 Run synthetic end-to-end shopping and infrastructure verification
 
 ${colors.bold}OPTIONS:${colors.reset}
@@ -158,11 +161,16 @@ async function execBridgeCommand(quickcartUrl, token, command, params = {}) {
 // COMMAND: INJECT
 async function handleInject(options) {
   const scenario = (options.scenario || '').toLowerCase();
-  const normalized = scenario.replace(/^sev-?/, 'sev');
+  const aliasMap = {
+    'sev1': 'sev1', 'sev-1': 'sev1', 'deadlock': 'sev1', 'db-lock': 'sev1', 'checkout-lock': 'sev1',
+    'sev2': 'sev2', 'sev-2': 'sev2', 'coupon-bug': 'sev2', 'coupon': 'sev2', 'cart-bug': 'sev2',
+    'sev3': 'sev3', 'sev-3': 'sev3', 'cache-bloat': 'sev3', 'cache': 'sev3', 'bloat': 'sev3'
+  };
+  const normalized = aliasMap[scenario] || scenario.replace(/^sev-?/, 'sev');
 
   if (!['sev1', 'sev2', 'sev3'].includes(normalized)) {
-    console.error(`${colors.red}Error: Invalid scenario '${options.scenario}'. Must be sev1, sev2, or sev3.${colors.reset}`);
-    console.error(`Usage: bin/chaos inject <sev1|sev2|sev3>`);
+    console.error(`${colors.red}Error: Invalid scenario '${options.scenario}'. Must be deadlock (or sev1), coupon-bug (or sev2), or cache-bloat (or sev3).${colors.reset}`);
+    console.error(`Usage: bin/chaos inject <deadlock|coupon-bug|cache-bloat|sev1|sev2|sev3>`);
     process.exit(1);
   }
 
@@ -282,12 +290,11 @@ async function handleInject(options) {
       console.log(`  Bridge Diagnostic: ${colors.yellow}${inspectRes.data?.output || 'Critical pressure'}${colors.reset}`);
     }
 
-    console.log(`${colors.bold}[3/3] Emitting SEV-3 telemetry signal to Appsolve...${colors.reset}`);
+    console.log(`${colors.bold}[3/3] Emitting raw cache bloat telemetry signal to Appsolve for TypeSafe Jev AI categorization...${colors.reset}`);
     const telemetryRes = await apiRequest(`${options.appsolveUrl}/api/v1/telemetry/signals`, 'POST', {
       service_slug: 'catalog',
       error_code: 'ERR_CACHE_BLOAT',
       message: `Image and thumbnail catalog cache bloat exceeded watermark: ${options.count} entries (memory pressure 94%)`,
-      severity: 'sev3',
       raw_payload: {
         bloat_count: options.count,
         memory_mb: 480,
@@ -411,6 +418,15 @@ async function handleStatus(options) {
     } else {
       console.log(`   Active Incident:       ${colors.green}None (Clean operational queue)${colors.reset}`);
     }
+
+    const aiStatusRes = await apiRequest(`${options.appsolveUrl}/api/v1/system/ai_status`);
+    if (aiStatusRes.ok) {
+      const aiConn = aiStatusRes.data?.ai_connected;
+      const aiBadge = aiConn
+        ? `${colors.green}✔ CONNECTED (Autonomous Triage Active)${colors.reset}`
+        : `${colors.yellow}○ DISCONNECTED (Token Saving Mode Active)${colors.reset}`;
+      console.log(`   AI Automation Engine:  ${aiBadge}`);
+    }
   }
 
   console.log(`\n${colors.bold}${colors.cyan}================================================================${colors.reset}\n`);
@@ -512,6 +528,41 @@ async function handleVerify(options) {
   }
 }
 
+// COMMAND: AI STATUS & TOGGLE
+async function handleAiStatus(options) {
+  const res = await apiRequest(`${options.appsolveUrl}/api/v1/system/ai_status`);
+  if (!res.ok) {
+    console.error(`${colors.red}Failed to reach Appsolve AI status endpoint at ${options.appsolveUrl}${colors.reset}`);
+    process.exit(1);
+  }
+  const connected = res.data?.ai_connected;
+  console.log(`\n${colors.bold}Appsolve AI Automation Status:${colors.reset}`);
+  console.log(`  State:        ${connected ? colors.green + '✔ CONNECTED (Autonomous Triage Active)' : colors.yellow + '○ DISCONNECTED (Token Saving Mode Active)'}${colors.reset}`);
+  console.log(`  Mode:         ${res.data?.mode}`);
+  console.log(`  Token Saving: ${res.data?.token_saving_active ? colors.yellow + 'YES (0 tokens consumed during fault testing)' : colors.green + 'NO (Full AI evaluation)'}${colors.reset}\n`);
+}
+
+async function handleAiDisconnect(options) {
+  const res = await apiRequest(`${options.appsolveUrl}/api/v1/system/ai_disconnect`, 'POST');
+  if (!res.ok) {
+    console.error(`${colors.red}Failed to disconnect AI automation: ${JSON.stringify(res.error)}${colors.reset}`);
+    process.exit(1);
+  }
+  console.log(`\n${colors.bold}${colors.yellow}✔ AI AUTOMATION DISCONNECTED (TOKEN SAVING MODE ACTIVE)${colors.reset}`);
+  console.log(`  ${res.data?.message || 'Hata sinyalleri yapay zeka token harcamadan kaydedilecek.'}`);
+  console.log(`  Mobil uygulamada ve emülatörde güvenle hata testleri yapabilirsiniz.\n`);
+}
+
+async function handleAiConnect(options) {
+  const res = await apiRequest(`${options.appsolveUrl}/api/v1/system/ai_connect`, 'POST');
+  if (!res.ok) {
+    console.error(`${colors.red}Failed to connect AI automation: ${JSON.stringify(res.error)}${colors.reset}`);
+    process.exit(1);
+  }
+  console.log(`\n${colors.bold}${colors.green}✔ AI AUTOMATION CONNECTED (AUTONOMOUS TRIAGE ACTIVE)${colors.reset}`);
+  console.log(`  ${res.data?.message || 'Gelen telemetri sinyalleri TypeSafe Jev ve Gemini Antigravity tarafından triyaj edilecek.'}\n`);
+}
+
 async function main() {
   const options = parseArgs();
 
@@ -529,6 +580,17 @@ async function main() {
       break;
     case 'status':
       await handleStatus(options);
+      break;
+    case 'ai-disconnect':
+    case 'disconnect':
+      await handleAiDisconnect(options);
+      break;
+    case 'ai-connect':
+    case 'connect':
+      await handleAiConnect(options);
+      break;
+    case 'ai-status':
+      await handleAiStatus(options);
       break;
     case 'verify':
       await handleVerify(options);

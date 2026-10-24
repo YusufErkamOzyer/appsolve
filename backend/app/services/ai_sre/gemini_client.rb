@@ -4,8 +4,11 @@ require "uri"
 
 module AiSre
   class GeminiClient
-    DEFAULT_MODEL = "gemini-2.5-flash".freeze
+    DEFAULT_MODEL = ENV.fetch("GEMINI_MODEL", "antigravity-preview-latest").freeze
     BASE_URL = "https://generativelanguage.googleapis.com/v1beta/models".freeze
+    INTERACTIONS_URL = "https://generativelanguage.googleapis.com/v1beta/interactions".freeze
+
+    @@cached_environment_id = nil
 
     SYSTEM_INSTRUCTION = <<~PROMPT.strip
       Sen Appsolve platformunun kıdemli AI SRE (Site Reliability Engineering) Ajanısın.
@@ -157,22 +160,77 @@ module AiSre
       required: ["headline", "public_message"]
     }.freeze
 
+    CODE_REPAIR_SYSTEM_INSTRUCTION = <<~PROMPT.strip
+      Sen Appsolve platformunun otonom AI SRE Kod Onarım Ajanısın (Antigravity Code Repair Engine).
+      Görevin: QuickCart servisinde meydana gelen çalışma zamanı hatasını (stack trace, hata mesajı ve kök neden hipotezini) inceleyerek kaynak dosyadaki hatayı düzelten yama bloğunu (target_snippet -> replacement_snippet) ve git unified diff (unified_diff) çıktısını üretmek.
+
+      KURALLAR:
+      1. Sağlanan kaynak kod içindeki hatalı satırları `target_snippet` olarak birebir seç.
+      2. Hatayı güvenli şekilde çözen düzeltilmiş satırları `replacement_snippet` olarak yaz (örn. undefined nesne erişimi için `|| { multiplier: 0 }` ve optional chaining `rateConfig?.multiplier || 0` ekle).
+      3. `unified_diff` standart git diff (`--- a/<dosya>` ve `+++ b/<dosya>`, `@@ ... @@`) formatında olmalıdır.
+      4. `pr_title` Conventional Commits formatında (`fix(cart): resolve coupon calculation error [...]` gibi) olmalıdır.
+    PROMPT
+
+    CODE_REPAIR_RESPONSE_SCHEMA = {
+      type: "OBJECT",
+      properties: {
+        target_snippet: { type: "STRING" },
+        replacement_snippet: { type: "STRING" },
+        unified_diff: { type: "STRING" },
+        pr_title: { type: "STRING" },
+        root_cause_explanation: { type: "STRING" }
+      },
+      required: ["target_snippet", "replacement_snippet", "unified_diff", "pr_title", "root_cause_explanation"]
+    }.freeze
+
     def initialize(api_key: ENV["GEMINI_API_KEY"], model: DEFAULT_MODEL)
       @api_key = api_key
       @model = model
     end
 
-    def analyze_signal(service:, raw_payload:)
-      if @api_key.present? && ENV["MOCK_AI"] != "true"
-        begin
-          call_gemini_api(service: service, raw_payload: raw_payload)
-        rescue StandardError => e
-          Rails.logger.warn("[AiSre::GeminiClient] Gemini API çağrısı başarısız oldu (#{e.message}), deterministik yedek analize geçiliyor.")
+    def analyze_signal(service:, raw_payload:, jev_decision: nil)
+      result =
+        if @api_key.present? && ENV["MOCK_AI"] != "true"
+          begin
+            call_gemini_api(service: service, raw_payload: raw_payload, jev_decision: jev_decision)
+          rescue StandardError => e
+            Rails.logger.warn("[AiSre::GeminiClient] Gemini API çağrısı başarısız oldu (#{e.message}), deterministik yedek analize geçiliyor.")
+            fallback_analysis(service: service, raw_payload: raw_payload)
+          end
+        else
           fallback_analysis(service: service, raw_payload: raw_payload)
         end
-      else
-        fallback_analysis(service: service, raw_payload: raw_payload)
+
+      if jev_decision.present?
+        result[:severity] = jev_decision[:severity] if jev_decision[:severity].present?
+        result[:recommended_action_plan] ||= {}
+        if jev_decision[:tool_name].present?
+          result[:recommended_action_plan][:tool_name] = jev_decision[:tool_name]
+          result[:recommended_action_plan]["tool_name"] = jev_decision[:tool_name]
+        end
+        if jev_decision[:risk_level].present?
+          result[:recommended_action_plan][:risk_level] = jev_decision[:risk_level]
+          result[:recommended_action_plan]["risk_level"] = jev_decision[:risk_level]
+        end
       end
+
+      result.with_indifferent_access
+    end
+
+    def generate_code_patch(incident:, source_file:, original_content:)
+      if @api_key.present? && ENV["MOCK_AI"] != "true"
+        begin
+          return call_gemini_code_repair_api(
+            incident: incident,
+            source_file: source_file,
+            original_content: original_content
+          )
+        rescue StandardError => e
+          Rails.logger.warn("[AiSre::GeminiClient] Gemini Code Repair API çağrısı başarısız oldu (#{e.message}), güvenli yama üreticisine geçiliyor.")
+        end
+      end
+
+      nil
     end
 
     def chat_in_war_room(incident:, message_content:, history: [])
@@ -216,26 +274,120 @@ module AiSre
 
     private
 
-    def call_gemini_api(service:, raw_payload:)
+    def antigravity_agent?
+      @model.to_s.start_with?("antigravity")
+    end
+
+    def execute_structured_prompt(system_instruction:, user_prompt:, response_schema:, timeout: 45)
+      if antigravity_agent?
+        call_antigravity_interactions_api(
+          system_instruction: system_instruction,
+          user_prompt: user_prompt,
+          response_schema: response_schema,
+          timeout: timeout
+        )
+      else
+        call_standard_generate_content_api(
+          system_instruction: system_instruction,
+          user_prompt: user_prompt,
+          response_schema: response_schema,
+          timeout: timeout
+        )
+      end
+    end
+
+    def call_antigravity_interactions_api(system_instruction:, user_prompt:, response_schema:, timeout: 45, retry_without_env: true)
+      url = URI("#{INTERACTIONS_URL}?key=#{@api_key}")
+      http = Net::HTTP.new(url.host, url.port)
+      http.use_ssl = true
+      http.read_timeout = timeout
+      http.open_timeout = 10
+
+      request = Net::HTTP::Post.new(url.request_uri, { "Content-Type" => "application/json" })
+
+      combined_input = <<~INPUT
+        CRITICAL AGENT INSTRUCTION:
+        Do NOT call any tools (do NOT call bash, view_file, read_file, grep, find, or any filesystem/terminal tool).
+        The target repository does NOT exist in your remote sandbox container. All required context and code are provided inline below.
+        Keep internal thinking brief and minimal (<100 tokens). Respond IMMEDIATELY in your first turn with ONLY a valid JSON object matching the required schema.
+
+        #{system_instruction}
+
+        ---
+        GÖREV:
+        #{user_prompt}
+
+        ÖNEMLİ ÇIKTI KURALI:
+        Hiçbir araç (tool) çalıştırmadan doğrudan aşağıdaki JSON şemasına birebir uyan GEÇERLİ BİR JSON nesnesi döndür (Markdown kod bloğu kullanma, sadece saf JSON döndür):
+        #{response_schema.to_json}
+      INPUT
+
+      payload = {
+        agent: @model,
+        environment: "remote",
+        input: combined_input
+      }
+      payload[:environment_id] = @@cached_environment_id if @@cached_environment_id.present?
+
+      request.body = payload.to_json
+      response = http.request(request)
+
+      unless response.is_a?(Net::HTTPSuccess)
+        if @@cached_environment_id.present? && retry_without_env
+          @@cached_environment_id = nil
+          return call_antigravity_interactions_api(
+            system_instruction: system_instruction,
+            user_prompt: user_prompt,
+            response_schema: response_schema,
+            timeout: timeout,
+            retry_without_env: false
+          )
+        end
+        raise "Antigravity Interactions API HTTP #{response.code}: #{response.body}"
+      end
+
+      parsed_response = JSON.parse(response.body)
+      @@cached_environment_id = parsed_response["environment_id"] if parsed_response["environment_id"].present?
+
+      steps = Array(parsed_response["steps"])
+      text_parts = steps.select { |s| s["type"] == "model_output" }.flat_map do |s|
+        Array(s["content"]).select { |c| c["type"] == "text" }.map { |c| c["text"].to_s }
+      end
+      raw_text = text_parts.join("\n").strip
+
+      if raw_text.empty?
+        raise "Antigravity Interactions API yanıtında metin içeriği bulunamadı."
+      end
+
+      cleaned_json = extract_json_object(raw_text)
+      JSON.parse(cleaned_json).with_indifferent_access
+    end
+
+    def extract_json_object(text)
+      stripped = text.to_s.strip
+      if stripped =~ /```(?:json)?\s*(\{.*\})\s*```/m
+        return Regexp.last_match(1).strip
+      end
+      first_brace = stripped.index("{")
+      last_brace = stripped.rindex("}")
+      if first_brace && last_brace && last_brace > first_brace
+        return stripped[first_brace..last_brace]
+      end
+      stripped
+    end
+
+    def call_standard_generate_content_api(system_instruction:, user_prompt:, response_schema:, timeout: 25)
       url = URI("#{BASE_URL}/#{@model}:generateContent?key=#{@api_key}")
       http = Net::HTTP.new(url.host, url.port)
       http.use_ssl = true
-      http.read_timeout = 15
+      http.read_timeout = timeout
       http.open_timeout = 5
 
       request = Net::HTTP::Post.new(url.request_uri, { "Content-Type" => "application/json" })
 
-      user_prompt = <<~PROMPT
-        Aşağıdaki QuickCart ham hata telemetri sinyalini analiz et:
-        - Servis: #{service.name} (#{service.slug}) - #{service.description}
-        - Telemetri Yükü: #{raw_payload.to_json}
-
-        Lütfen iş etkisini değerlendir, SEV-1, SEV-2 veya SEV-3 seviyesini belirle, gerekçesini, kök neden hipotezini ve önerilen eylem planını sağlanan JSON şemasına uygun olarak üret.
-      PROMPT
-
       body = {
         system_instruction: {
-          parts: [{ text: SYSTEM_INSTRUCTION }]
+          parts: [{ text: system_instruction }]
         },
         contents: [
           {
@@ -245,7 +397,7 @@ module AiSre
         ],
         generationConfig: {
           responseMimeType: "application/json",
-          responseSchema: RESPONSE_SCHEMA,
+          responseSchema: response_schema,
           temperature: 0.1
         }
       }
@@ -259,12 +411,82 @@ module AiSre
 
       parsed_response = JSON.parse(response.body)
       text_content = parsed_response.dig("candidates", 0, "content", "parts", 0, "text")
-
-      unless text_content
-        raise "Gemini API yanıtında metin içeriği bulunamadı."
-      end
+      raise "Gemini API yanıtında metin içeriği bulunamadı." unless text_content
 
       JSON.parse(text_content).with_indifferent_access
+    end
+
+    def call_gemini_api(service:, raw_payload:, jev_decision: nil)
+      jev_context =
+        if jev_decision.present?
+          <<~JEV
+            TypeSafe Jev (System One) Ön Kategorizasyon Kararı:
+            - Belirlenen Kritiklik (Severity): #{jev_decision[:severity]} (Confidence: #{jev_decision[:confidence]})
+            - Teknik Kategori: #{jev_decision[:category]}
+            - Önerilen Müdahale Aracı (tool_name): #{jev_decision[:tool_name]}
+            - Olasılık Dağılımı: #{jev_decision[:probabilities].to_json}
+          JEV
+        else
+          ""
+        end
+
+      user_prompt = <<~PROMPT
+        Aşağıdaki QuickCart ham hata telemetri sinyalini analiz et:
+        - Servis: #{service.name} (#{service.slug}) - #{service.description}
+        - Telemetri Yükü: #{raw_payload.to_json}
+        #{jev_context}
+
+        Lütfen iş etkisini değerlendir, gerekçesini (business_impact_reasoning), kök neden hipotezini (root_cause_hypothesis) ve önerilen eylem planını (recommended_action_plan) sağlanan JSON şemasına uygun olarak Türkçe üret.
+      PROMPT
+
+      execute_structured_prompt(
+        system_instruction: SYSTEM_INSTRUCTION,
+        user_prompt: user_prompt,
+        response_schema: RESPONSE_SCHEMA
+      )
+    end
+
+    def call_gemini_code_repair_api(incident:, source_file:, original_content:)
+      raw = incident.raw_payload || {}
+      stack_trace = raw.dig("raw_payload", "stack_trace") || raw["stack_trace"] || ""
+      line_num = (raw.dig("raw_payload", "line_number") || raw["line_number"]).to_i
+      error_msg = raw["message"] || incident.title
+
+      lines = original_content.to_s.lines
+      focused_code =
+        if lines.length > 60 && line_num > 0
+          start_idx = [ line_num - 25, 0 ].max
+          end_idx = [ line_num + 25, lines.length - 1 ].min
+          lines[start_idx..end_idx].join
+        elsif lines.length > 60
+          lines.last(60).join
+        else
+          original_content
+        end
+
+      user_prompt = <<~PROMPT
+        Aşağıdaki çalışma zamanı hatasını kaynak kod üzerinde onar:
+        - Olay Kodu: #{incident.incident_code} (#{incident.severity})
+        - Servis: #{incident.service&.name} (#{incident.service&.slug})
+        - Hata Mesajı: #{error_msg}
+        - Kök Neden Hipotezi: #{incident.hypothesis}
+        - Stack Trace:
+        #{stack_trace}
+
+        - Etkilenen Kaynak Dosya Kesiti (`#{source_file}`):
+        ```
+        #{focused_code}
+        ```
+
+        Lütfen dosyadaki hatalı kod bloğunu `target_snippet`, düzeltilmiş halini `replacement_snippet`, `--- a/#{source_file}` ve `+++ b/#{source_file}` başlıklarını içeren `unified_diff`, uygun `pr_title` ve `root_cause_explanation` alanlarını JSON şemasına uygun üret.
+      PROMPT
+
+      execute_structured_prompt(
+        system_instruction: CODE_REPAIR_SYSTEM_INSTRUCTION,
+        user_prompt: user_prompt,
+        response_schema: CODE_REPAIR_RESPONSE_SCHEMA,
+        timeout: 65
+      )
     end
 
     def fallback_analysis(service:, raw_payload:)
@@ -329,14 +551,6 @@ module AiSre
     end
 
     def call_gemini_war_room_api(incident:, message_content:, history: [])
-      url = URI("#{BASE_URL}/#{@model}:generateContent?key=#{@api_key}")
-      http = Net::HTTP.new(url.host, url.port)
-      http.use_ssl = true
-      http.read_timeout = 15
-      http.open_timeout = 5
-
-      request = Net::HTTP::Post.new(url.request_uri, { "Content-Type" => "application/json" })
-
       context_prompt = <<~PROMPT
         Olay Bilgileri:
         - Kod: #{incident.incident_code} (#{incident.severity}) - Durum: #{incident.status}
@@ -352,38 +566,11 @@ module AiSre
         Lütfen @solver kimliğiyle bu mesaja uygun teknik açıklamayı, varsa yeni implementasyon planını (create_plan: true ve plan objesi) veya tanı komutunu üret.
       PROMPT
 
-      body = {
-        system_instruction: {
-          parts: [{ text: WAR_ROOM_SYSTEM_INSTRUCTION }]
-        },
-        contents: [
-          {
-            role: "user",
-            parts: [{ text: context_prompt }]
-          }
-        ],
-        generationConfig: {
-          responseMimeType: "application/json",
-          responseSchema: WAR_ROOM_RESPONSE_SCHEMA,
-          temperature: 0.1
-        }
-      }
-
-      request.body = body.to_json
-      response = http.request(request)
-
-      unless response.is_a?(Net::HTTPSuccess)
-        raise "Gemini API HTTP #{response.code}: #{response.body}"
-      end
-
-      parsed_response = JSON.parse(response.body)
-      text_content = parsed_response.dig("candidates", 0, "content", "parts", 0, "text")
-
-      unless text_content
-        raise "Gemini API yanıtında metin içeriği bulunamadı."
-      end
-
-      JSON.parse(text_content).with_indifferent_access
+      execute_structured_prompt(
+        system_instruction: WAR_ROOM_SYSTEM_INSTRUCTION,
+        user_prompt: context_prompt,
+        response_schema: WAR_ROOM_RESPONSE_SCHEMA
+      )
     end
 
     def fallback_war_room_chat(incident:, message_content:)
@@ -445,14 +632,6 @@ module AiSre
     end
 
     def call_gemini_post_mortem_api(incident:)
-      url = URI("#{BASE_URL}/#{@model}:generateContent?key=#{@api_key}")
-      http = Net::HTTP.new(url.host, url.port)
-      http.use_ssl = true
-      http.read_timeout = 20
-      http.open_timeout = 5
-
-      request = Net::HTTP::Post.new(url.request_uri, { "Content-Type" => "application/json" })
-
       events_summary = incident.incident_events.order(occurred_at: :asc).map do |ev|
         "#{ev.occurred_at.strftime('%H:%M:%S')} [#{ev.actor}]: #{ev.title} - #{ev.details}"
       end.join("\n")
@@ -486,35 +665,11 @@ module AiSre
         JSON formatında üret.
       PROMPT
 
-      body = {
-        system_instruction: {
-          parts: [{ text: POST_MORTEM_SYSTEM_INSTRUCTION }]
-        },
-        contents: [
-          {
-            role: "user",
-            parts: [{ text: prompt }]
-          }
-        ],
-        generationConfig: {
-          responseMimeType: "application/json",
-          responseSchema: POST_MORTEM_RESPONSE_SCHEMA,
-          temperature: 0.1
-        }
-      }
-
-      request.body = body.to_json
-      response = http.request(request)
-
-      unless response.is_a?(Net::HTTPSuccess)
-        raise "Gemini API HTTP #{response.code}: #{response.body}"
-      end
-
-      parsed = JSON.parse(response.body)
-      text = parsed.dig("candidates", 0, "content", "parts", 0, "text")
-      raise "Gemini API metin içeriği boş." unless text
-
-      JSON.parse(text).with_indifferent_access
+      execute_structured_prompt(
+        system_instruction: POST_MORTEM_SYSTEM_INSTRUCTION,
+        user_prompt: prompt,
+        response_schema: POST_MORTEM_RESPONSE_SCHEMA
+      )
     end
 
     def fallback_post_mortem(incident:)
@@ -560,14 +715,6 @@ module AiSre
     end
 
     def call_gemini_customer_status_api(incident:, phase:)
-      url = URI("#{BASE_URL}/#{@model}:generateContent?key=#{@api_key}")
-      http = Net::HTTP.new(url.host, url.port)
-      http.use_ssl = true
-      http.read_timeout = 15
-      http.open_timeout = 5
-
-      request = Net::HTTP::Post.new(url.request_uri, { "Content-Type" => "application/json" })
-
       service_name = incident.service&.name || "Sistem"
       service_slug = incident.service&.slug || "system"
       sev = incident.severity || "SEV-2"
@@ -583,37 +730,11 @@ module AiSre
         KESİN KURAL: Teknik jargondan (DB lock, SQL, stack trace, 504, Redis, timeout vb.) tamamen arındırılmış kurumsal Türkçe metin olmalıdır.
       PROMPT
 
-      body = {
-        system_instruction: {
-          parts: [{ text: CUSTOMER_STATUS_SYSTEM_INSTRUCTION }]
-        },
-        contents: [
-          {
-            role: "user",
-            parts: [{ text: user_prompt }]
-          }
-        ],
-        generationConfig: {
-          responseMimeType: "application/json",
-          responseSchema: CUSTOMER_STATUS_RESPONSE_SCHEMA,
-          temperature: 0.2
-        }
-      }
-
-      request.body = body.to_json
-      response = http.request(request)
-
-      unless response.is_a?(Net::HTTPSuccess)
-        raise "Gemini Customer Status API HTTP #{response.code}: #{response.body}"
-      end
-
-      parsed_response = JSON.parse(response.body)
-      text_content = parsed_response.dig("candidates", 0, "content", "parts", 0, "text")
-      unless text_content
-        raise "Gemini API müşteri duyurusu yanıtında metin içeriği bulunamadı."
-      end
-
-      JSON.parse(text_content).with_indifferent_access
+      execute_structured_prompt(
+        system_instruction: CUSTOMER_STATUS_SYSTEM_INSTRUCTION,
+        user_prompt: user_prompt,
+        response_schema: CUSTOMER_STATUS_RESPONSE_SCHEMA
+      )
     end
 
     def fallback_customer_status_message(incident:, phase:)

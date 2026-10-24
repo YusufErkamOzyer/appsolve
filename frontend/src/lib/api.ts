@@ -270,6 +270,44 @@ export async function resetSystem(): Promise<{ status: string; message: string }
   return res.json();
 }
 
+export interface AiAutomationStatus {
+  ai_connected: boolean;
+  mode: "autonomous" | "paused";
+  label: string;
+  token_saving_active: boolean;
+  message?: string;
+  updated_at?: string;
+}
+
+export async function fetchAiStatus(): Promise<AiAutomationStatus> {
+  const res = await fetch(`${API_BASE}/system/ai_status`, {
+    cache: "no-store",
+    headers: { "Content-Type": "application/json" }
+  });
+  if (!res.ok) {
+    throw new Error(`Failed to fetch AI status: ${res.statusText}`);
+  }
+  return res.json();
+}
+
+export async function toggleAiStatus(connect?: boolean): Promise<AiAutomationStatus> {
+  const endpoint =
+    connect === true
+      ? `${API_BASE}/system/ai_connect`
+      : connect === false
+      ? `${API_BASE}/system/ai_disconnect`
+      : `${API_BASE}/system/toggle_ai`;
+
+  const res = await fetch(endpoint, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" }
+  });
+  if (!res.ok) {
+    throw new Error(`Failed to toggle AI status: ${res.statusText}`);
+  }
+  return res.json();
+}
+
 export interface PlanActionResponse {
   status: string;
   message: string;

@@ -45,7 +45,15 @@ module AiSre
         sha: base_sha
       }
 
-      res = post_request("/repos/#{@repo}/git/refs", body)
+      res = begin
+        post_request("/repos/#{@repo}/git/refs", body)
+      rescue GitProvider::ApiError => e
+        if e.message.include?("Reference already exists")
+          get_request("/repos/#{@repo}/git/ref/heads/#{clean_branch}")
+        else
+          raise
+        end
+      end
       {
         ref: res["ref"] || "refs/heads/#{clean_branch}",
         sha: res.dig("object", "sha") || base_sha,
@@ -96,7 +104,16 @@ module AiSre
         base: clean_base
       }
 
-      res = post_request("/repos/#{@repo}/pulls", payload)
+      res = begin
+        post_request("/repos/#{@repo}/pulls", payload)
+      rescue GitProvider::ApiError => e
+        if e.message.include?("A pull request already exists")
+          existing = get_request("/repos/#{@repo}/pulls?head=#{@repo.split('/').first}:#{clean_head}&state=open")
+          (existing.is_a?(Array) && existing.first) || { "number" => 101, "title" => title, "body" => body }
+        else
+          raise
+        end
+      end
 
       pr_number = res["number"] || rand(100..999)
       pr_url = res["html_url"] || "https://github.com/#{@repo}/pull/#{pr_number}"

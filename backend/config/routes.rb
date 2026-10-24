@@ -21,6 +21,10 @@ Rails.application.routes.draw do
       end
 
       post "system/reset", to: "system#reset"
+      get "system/ai_status", to: "system#ai_status"
+      post "system/ai_connect", to: "system#ai_connect"
+      post "system/ai_disconnect", to: "system#ai_disconnect"
+      post "system/toggle_ai", to: "system#toggle_ai"
     end
   end
 end

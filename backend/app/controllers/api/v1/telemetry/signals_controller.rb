@@ -26,13 +26,14 @@ module Api
             end
           end
 
+          # Create incident without pre-assigned severity; TypeSafe Jev + Gemini AI Triage determines severity
           incident = Incident.create!(
             service: service,
             title: "#{error_code}: #{message.truncate(80)}",
-            severity: normalized_severity,
+            severity: nil,
             status: "investigating",
             autonomy_mode: "pending_triage",
-            raw_payload: raw_payload
+            raw_payload: raw_payload.except("severity", :severity)
           )
 
           # Update service last incident timestamp
@@ -46,12 +47,19 @@ module Api
             occurred_at: Time.current
           )
 
-          # AI SRE Triage & Guardrail Motorunu çalıştır
-          AiSre::TriageService.call(incident)
+          # AI SRE Triage & Guardrail Motorunu çalıştır veya Token Tasarrufu Modunda atla
+          if AiSre::AutomationConfig.ai_connected?
+            AiSre::TriageService.call(incident)
+            triage_message = "Telemetri sinyali başarıyla işlendi ve AI Triage tamamlandı."
+          else
+            handle_disconnected_ai(incident, service, error_code, message)
+            triage_message = "AI bağlantısı kesik olduğu için sinyal token harcanmadan kaydedildi (Token Tasarrufu Modu)."
+          end
 
           render json: {
             status: "accepted",
-            message: "Telemetri sinyali başarıyla işlendi ve AI Triage tamamlandı.",
+            message: triage_message,
+            ai_automation_skipped: !AiSre::AutomationConfig.ai_connected?,
             incident: {
               id: incident.id,
               incident_code: incident.incident_code,
@@ -107,6 +115,66 @@ module Api
           }, status: :created
         rescue ActiveRecord::RecordInvalid => e
           render json: { error: e.message }, status: :unprocessable_entity
+        end
+
+        private
+
+        def handle_disconnected_ai(incident, service, error_code, message)
+          code_upper = error_code.to_s.upcase
+          msg_lower = message.to_s.downcase
+
+          fallback_severity = if code_upper.include?("LOCK") || code_upper.include?("DEADLOCK") || msg_lower.include?("lock")
+            "SEV-1"
+          elsif code_upper.include?("COUPON") || msg_lower.include?("multiplier") || msg_lower.include?("nan")
+            "SEV-2"
+          elsif code_upper.include?("CACHE") || code_upper.include?("BLOAT")
+            "SEV-3"
+          else
+            "SEV-2"
+          end
+
+          service_status = fallback_severity == "SEV-1" ? "outage" : "degraded"
+          service.update!(status: service_status, last_incident_at: Time.current)
+
+          incident.update!(
+            severity: fallback_severity,
+            status: "investigating",
+            autonomy_mode: "manual_command_only",
+            escalation_target: "none",
+            hypothesis: "AI Ajanları Bağlantısı Kesik (Token Tasarrufu Modu). Telemetri kaydedildi.",
+            reasoning: "Geliştirici mobil hata testi sırasında yapay zeka token tüketimini engellemek için AI bağlantısını kesti. Otomatik LLM ve karar motoru çağrıları atlandı."
+          )
+
+          incident.incident_events.create!(
+            event_type: "ai_bypassed",
+            actor: "system",
+            title: "AI Ajanları Tetiklenmedi (Token Tasarrufu Modu)",
+            details: "Appsolve app barından AI bağlantısı kesildiği için TypeSafe Jev ve Gemini Antigravity ajanları çalıştırılmadı. 0 token harcandı.",
+            occurred_at: Time.current
+          )
+
+          incident.war_room_messages.create!(
+            sender_type: "system",
+            sender_name: "Appsolve Core",
+            message_type: "system_diagnostic",
+            content: "⏸️ [AI BAĞLANTISI KESİK - TOKEN TASARRUFU AKTİF]\n\nHata sinyali [#{error_code}] başarıyla kaydedildi ancak gereksiz token tüketimini önlemek amacıyla otomatik AI triyaj ve kod onarım motoru çalıştırılmadı.\n\nAI analizini başlatmak için Appsolve üst barındaki 'BAĞLAN' butonuna tıklayabilirsiniz."
+          )
+
+          public_msg = if fallback_severity == "SEV-1"
+            "Ödeme sistemlerimizde geçici bir kilitlenme tespit edilmiş olup teknik ekiplerimiz müdahale etmektedir."
+          elsif fallback_severity == "SEV-2"
+            "Sepet ve indirim kuponu adımlarında geçici bir aksaklık tespit edilmiştir. İnceleme devam etmektedir."
+          else
+            "Katalog arama ve listeleme servislerimizde hafif yavaşlama gözlemlenmektedir."
+          end
+
+          StatusUpdate.create!(
+            incident: incident,
+            service: service,
+            phase: "investigating",
+            public_message: public_msg,
+            visible_on_status_page: true
+          )
         end
       end
     end

@@ -1,10 +1,10 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { OsClock } from "./OsClock";
-import { resetSystem, Service } from "@/lib/api";
+import { resetSystem, fetchAiStatus, toggleAiStatus, Service } from "@/lib/api";
 
 interface OsNavbarProps {
   onResetComplete?: () => void;
@@ -23,6 +23,43 @@ export function OsNavbar({
   const pathname = usePathname();
   const [resetting, setResetting] = useState(false);
   const [showServiceFlyout, setShowServiceFlyout] = useState(false);
+  const [aiConnected, setAiConnected] = useState<boolean>(true);
+  const [togglingAi, setTogglingAi] = useState<boolean>(false);
+
+  useEffect(() => {
+    let isMounted = true;
+    const checkAi = async () => {
+      try {
+        const res = await fetchAiStatus();
+        if (isMounted) {
+          setAiConnected(res.ai_connected);
+        }
+      } catch {
+        // Silently poll
+      }
+    };
+
+    void checkAi();
+    const interval = setInterval(checkAi, 4000);
+    return () => {
+      isMounted = false;
+      clearInterval(interval);
+    };
+  }, []);
+
+  const handleToggleAi = async (desiredState?: boolean) => {
+    setTogglingAi(true);
+    try {
+      const nextState = desiredState !== undefined ? desiredState : !aiConnected;
+      setAiConnected(nextState);
+      const res = await toggleAiStatus(nextState);
+      setAiConnected(res.ai_connected);
+    } catch (err) {
+      alert("AI bağlantı durumu değiştirilemedi: " + err);
+    } finally {
+      setTogglingAi(false);
+    }
+  };
 
   const handleReset = async () => {
     if (
@@ -141,6 +178,58 @@ export function OsNavbar({
           {/* Clock */}
           <div className="text-white/90">
             <OsClock className="bg-white/10 text-[#FFFFFF] border-white/30" />
+          </div>
+
+          <span className="text-white/30 hidden sm:inline">|</span>
+
+          {/* AI Ajanları Bağlantı ve Token Tasarrufu Kontrolcüsü */}
+          <div
+            className="flex items-center gap-1.5 border border-white/20 bg-white/5 px-2 py-0.5 text-[11px] font-mono select-none"
+            test-id="ai-automation-controller"
+          >
+            {aiConnected ? (
+              <div className="flex items-center gap-2">
+                <span
+                  className="flex items-center gap-1.5 text-[#4ADE80] font-bold text-[10px]"
+                  title="AI ajanları (TypeSafe Jev & Gemini Antigravity) aktif ve bağlı"
+                >
+                  <span className="w-2 h-2 rounded-full bg-[#4ADE80] animate-pulse" />
+                  <span className="hidden sm:inline">AI:</span>
+                  <span>BAĞLI</span>
+                </span>
+                <button
+                  type="button"
+                  onClick={() => handleToggleAi(false)}
+                  disabled={togglingAi}
+                  className="px-2 py-0.5 bg-[#D9383A] hover:bg-[#b82b2d] active:bg-[#992224] text-white border border-white/40 text-[10px] font-bold cursor-pointer transition-none select-none"
+                  title="Mobil hata testlerinde gereksiz token tüketimini önlemek için AI bağlantısını kes"
+                  test-id="btn-disconnect-ai"
+                >
+                  {togglingAi ? "..." : "BAĞLANTIYI KES"}
+                </button>
+              </div>
+            ) : (
+              <div className="flex items-center gap-2">
+                <span
+                  className="flex items-center gap-1.5 text-[#FBBF24] font-bold text-[10px]"
+                  title="AI bağlantısı kesik: Hata sinyalleri yapay zeka token'ı harcamadan kaydedilir"
+                >
+                  <span className="w-2 h-2 rounded-full bg-[#FBBF24]" />
+                  <span className="hidden sm:inline">AI:</span>
+                  <span>KESİK (TASARRUF)</span>
+                </span>
+                <button
+                  type="button"
+                  onClick={() => handleToggleAi(true)}
+                  disabled={togglingAi}
+                  className="px-2 py-0.5 bg-[#1E8E5A] hover:bg-[#167046] active:bg-[#0f4d30] text-white border border-white/40 text-[10px] font-bold cursor-pointer transition-none select-none"
+                  title="AI ajanlarını bağla ve otomatik triyajı aktif et"
+                  test-id="btn-connect-ai"
+                >
+                  {togglingAi ? "..." : "BAĞLAN"}
+                </button>
+              </div>
+            )}
           </div>
 
           <span className="text-white/30 hidden sm:inline">|</span>

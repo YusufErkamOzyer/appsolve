@@ -4,9 +4,12 @@ Thumbs.db
 
 # Environment variables
 .env
+.env.*
 .env.local
 .env.*.local
 *.local
+backend/.env
+backend/.env.*
 
 # Node / Frontend
 node_modules/
