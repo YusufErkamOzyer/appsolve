@@ -1,3 +1,5 @@
+# frozen_string_literal: true
+
 module AiSre
   class RemediationService
     class AlreadyResolvedError < StandardError; end
@@ -18,6 +20,8 @@ module AiSre
     def initialize(incident)
       @incident = incident
       @service = incident.service
+      @bridge_client = AiSre::SreBridgeClient.new
+      @git_provider = AiSre::GitProvider.current
     end
 
     def route_after_triage!
@@ -51,9 +55,9 @@ module AiSre
             @incident.war_room_messages.where(message_type: "action_card").last
         end
 
-      plan = action_card_msg&.action_card_payload.presence || @incident.recommended_action_plan || {}
-      active_plan_id = plan["plan_id"] || plan[:plan_id] || "PLAN #01"
-      title = plan["title"] || plan[:title] || "Sistem Müdahalesi"
+      plan = (action_card_msg&.action_card_payload.presence || @incident.recommended_action_plan || {}).dup.with_indifferent_access
+      active_plan_id = plan["plan_id"] || "PLAN #01"
+      title = plan["title"] || "Sistem Müdahalesi"
 
       @incident.incident_events.create!(
         event_type: "plan_approved",
@@ -62,6 +66,43 @@ module AiSre
         details: "#{approved_by} tarafından '#{title}' planı tek tıkla onaylandı ve icra başlatıldı.",
         occurred_at: Time.current
       )
+
+      # R3: SEV-2 Code Fix: PR Merge ve QuickCart SRE Sandbox Bridge Source Sync
+      if plan["github_pr_number"].present?
+        merge_res = @git_provider.merge_pull_request(
+          pr_number: plan["github_pr_number"],
+          commit_title: "merge: resolve #{plan['github_branch']} into main"
+        )
+
+        plan["merge_status"] = "merged"
+        plan["merge_commit_sha"] = merge_res[:merge_commit_sha]
+
+        # Dispatch sync_source to QuickCart SRE Sandbox Bridge
+        target_file = plan["affected_file"].presence || "src/services/cart.service.ts"
+        patched_content = plan["patched_content"].to_s
+
+        bridge_res = @bridge_client.sync_source(
+          target_file: target_file,
+          content: patched_content,
+          incident_id: @incident.id
+        )
+
+        plan["sre_bridge_action"] = "sync_source"
+        plan["sre_bridge_status"] = (bridge_res[:status] == "success" ? "synced" : "failed")
+        plan["sre_bridge_output"] = bridge_res[:output]
+
+        # QuickCart health check verification probe
+        @bridge_client.health_check(incident_id: @incident.id)
+
+      elsif plan["tool_name"].to_s.include?("kill_db_locks")
+        # R3: SEV-1 Database Deadlock Resolution via Bridge
+        bridge_res = @bridge_client.kill_db_locks(incident_id: @incident.id)
+        plan["sre_bridge_action"] = "kill_db_locks"
+        plan["sre_bridge_status"] = (bridge_res[:status] == "success" ? "executed" : "failed")
+        plan["sre_bridge_output"] = bridge_res[:output]
+
+        @bridge_client.health_check(incident_id: @incident.id)
+      end
 
       # Müdahale aracını çalıştır
       result = AiSre::SystemToolRunner.execute!(
@@ -171,12 +212,21 @@ module AiSre
 
     # Yol A (SEV-3): Tam Otonom İnsansız Çözüm
     def execute_autonomous_resolution!
+      # R3: Dispatches purge_cache via SreBridgeClient immediately without requiring manual approval
+      bridge_res = @bridge_client.purge_cache(incident_id: @incident.id)
+
+      plan = (@incident.recommended_action_plan || {}).dup.with_indifferent_access
+      plan["sre_bridge_action"] = "purge_cache"
+      plan["sre_bridge_status"] = (bridge_res[:status] == "success" ? "purged" : "failed")
+      plan["sre_bridge_output"] = bridge_res[:output]
+
       result = AiSre::SystemToolRunner.execute!(
         incident: @incident,
-        execution_mode: :autonomous
+        execution_mode: :autonomous,
+        plan: plan
       )
 
-      payload = build_action_card_payload(result: result, autonomous: true)
+      payload = build_action_card_payload(result: result, autonomous: true, plan: plan)
 
       @incident.war_room_messages.create!(
         sender_type: "gemini_ai_agent",
@@ -220,35 +270,75 @@ module AiSre
       AiSre::PostMortemGenerator.generate!(@incident)
     end
 
-    # Yol B (SEV-2): Nöbetçi Mühendis İçin İnteraktif Eylem Kartı Hazırlığı
+    # Yol B (SEV-2): Nöbetçi Mühendis İçin İnteraktif Eylem Kartı Hazırlığı (GitHub PR & Diff)
     def prepare_human_approval_card!
-      plan = @incident.recommended_action_plan || {}
+      plan = (@incident.recommended_action_plan || {}).dup.with_indifferent_access
+
+      # R3: Parse stack trace, locate source file, generate code repair & diff, create Git branch + PR
+      repair = AiSre::CodeRepairService.call(@incident, git_provider: @git_provider)
+
+      # Create branch on GitProvider
+      @git_provider.create_branch(repair.branch_name)
+
+      # Commit patch on GitProvider
+      @git_provider.commit_patch(
+        branch: repair.branch_name,
+        path: repair.source_file,
+        content: repair.patched_content,
+        message: repair.pr_title
+      )
+
+      # Open Pull Request
+      pr = @git_provider.create_pull_request(
+        title: repair.pr_title,
+        body: repair.pr_body,
+        head_branch: repair.branch_name,
+        base_branch: "main"
+      )
+
       payload = {
         "plan_id" => plan["plan_id"] || "PLAN #02",
-        "title" => plan["title"] || "Sistem İyileştirme Planı",
-        "tool_name" => plan["tool_name"] || "rollback_feature_flag",
+        "title" => plan["title"] || "GitHub PR ve SRE Köprüsü ile Kod Düzeltmesi",
+        "tool_name" => plan["tool_name"] || "merge_pr_and_sync_source",
         "risk_level" => plan["risk_level"] || "medium",
         "hypothesis" => @incident.hypothesis,
         "reasoning" => @incident.reasoning,
-        "steps" => Array(plan["steps"]),
+        "steps" => [
+          "GitHub üzerinde '#{repair.branch_name}' dalı açıldı",
+          "Düzeltme PR ##{pr[:pr_number]} olarak açıldı",
+          "Unified diff ve düzeltilen dosya (#{repair.source_file}) incelendi",
+          "Mühendis onayı sonrası PR merge edilecek ve QuickCart SRE bridge ile sync_source çalıştırılacak"
+        ],
         "estimated_duration" => "10-15 dk",
-        "impact_scope" => "#{@service.name} Servisi (#{@service.slug})"
+        "impact_scope" => "#{@service.name} Servisi (#{@service.slug})",
+        # R3 & R4 Enhanced GitHub fields
+        "github_branch" => repair.branch_name,
+        "github_branch_url" => pr[:branch_url],
+        "github_pr_number" => pr[:pr_number],
+        "github_pr_url" => pr[:pr_url],
+        "diff_content" => repair.unified_diff,
+        "affected_file" => repair.source_file,
+        "merge_status" => "pending",
+        "patched_content" => repair.patched_content
       }
+
+      # Update incident recommended_action_plan with the enriched payload
+      @incident.update!(recommended_action_plan: payload)
 
       @incident.war_room_messages.create!(
         sender_type: "gemini_ai_agent",
         sender_name: "Gemini AI SRE Ajanı",
         message_type: "action_card",
         action_status: "pending",
-        content: "Kök neden hipotezi doğrultusunda tek tıkla uygulanabilir bir iyileştirme planı hazırladım. Onayınız bekleniyor.",
+        content: "Kök neden hipotezi doğrultusunda GitHub PR ##{pr[:pr_number]} açtım ve tek tıkla uygulanabilir eylem kartı hazırladım. Onayınız bekleniyor.",
         action_card_payload: payload
       )
 
       @incident.incident_events.create!(
         event_type: "action_card_posted",
         actor: "gemini_ai_agent",
-        title: "War Room İçine Eylem Kartı Bırakıldı (#{payload['plan_id']})",
-        details: "Nöbetçi mühendisin tek tıkla onaylayabileceği çözüm planı War Room'da hazırlandı.",
+        title: "War Room İçine Eylem Kartı Bırakıldı (PR ##{pr[:pr_number]})",
+        details: "Nöbetçi mühendisin tek tıkla onaylayabileceği GitHub PR ve düzeltme planı War Room'da hazırlandı.",
         occurred_at: Time.current
       )
 
@@ -258,16 +348,28 @@ module AiSre
 
     # Yol C (SEV-1): AI Hipotez, Hata Açıklaması ve Tek Tıkla İnteraktif İmplementasyon Planı
     def prepare_manual_war_room_state!
-      plan = @incident.recommended_action_plan || {}
+      # R3: Inspect DB locks via SreBridgeClient
+      bridge_res = @bridge_client.inspect_db_locks(incident_id: @incident.id)
+
+      plan = (@incident.recommended_action_plan || {}).dup.with_indifferent_access
       payload = {
         "plan_id" => plan["plan_id"] || "PLAN #01",
-        "title" => plan["title"] || "Kritik Sistem Kurtarma",
-        "tool_name" => plan["tool_name"] || "kill_db_locks_and_failover",
+        "title" => plan["title"] || "Kritik Veritabanı Kilitlerini Temizle",
+        "tool_name" => plan["tool_name"] || "kill_db_locks",
         "risk_level" => "high",
         "hypothesis" => @incident.hypothesis,
-        "steps" => Array(plan["steps"]),
-        "guardrail_status" => "manual_command_only"
+        "steps" => Array(plan["steps"]).presence || [
+          "inspect_db_locks ile aktif kilitleri sorgula",
+          "kill_db_locks ile bloke iş parçacıklarını sonlandır",
+          "Bağlantı havuzunu sıfırla ve sağlık kontrolü yap"
+        ],
+        "guardrail_status" => "manual_command_only",
+        "db_locks_diagnostic" => bridge_res[:output],
+        "sre_bridge_action" => "inspect_db_locks",
+        "sre_bridge_output" => bridge_res[:output]
       }
+
+      @incident.update!(recommended_action_plan: payload)
 
       # 1. @solver Hata ve Hipotez Açıklaması
       @incident.war_room_messages.create!(
@@ -277,8 +379,9 @@ module AiSre
         content: "🚨 KRİTİK SEV-1 KRİZİ TESPİT EDİLDİ\n\n" \
                  "🔍 Hata Açıklaması: #{@incident.reasoning}\n\n" \
                  "💡 Kök Neden Hipotezi: #{@incident.hypothesis}\n\n" \
+                 "🔍 QuickCart SRE Köprüsü Tanı Özeti:\n#{bridge_res[:output]}\n\n" \
                  "Bu sorunu gidermek üzere aşağıda 'PLAN #01' implementasyon planını hazırladım. " \
-                 "Tek tıkla çalıştırabilir veya sohbet üzerinden bana (@solver) yeni yönergeler vererek planı revize etmemi isteyebilirsiniz."
+                 "Tek tıkla çalıştırabilir veya sohbet üzerinden bana (@solver) yeni yönergeler verebilirsiniz."
       )
 
       # 2. Tek tıkla çalıştırılabilir ilk implementasyon planı (pending)
@@ -304,7 +407,7 @@ module AiSre
     end
 
     def build_action_card_payload(result:, approved_by: nil, autonomous: false, plan: nil)
-      p = plan || @incident.recommended_action_plan || {}
+      p = (plan || @incident.recommended_action_plan || {}).dup.with_indifferent_access
       {
         "plan_id" => result.plan_id.presence || p["plan_id"] || "PLAN #01",
         "title" => result.title.presence || p["title"] || "Sistem Müdahalesi",
@@ -316,7 +419,19 @@ module AiSre
         "verification_summary" => result.verification_summary,
         "executed_at" => result.executed_at.iso8601,
         "approved_by" => approved_by,
-        "autonomous" => autonomous
+        "autonomous" => autonomous,
+        # Enhanced GitHub and SRE Bridge fields preservation
+        "github_branch" => p["github_branch"],
+        "github_branch_url" => p["github_branch_url"],
+        "github_pr_number" => p["github_pr_number"],
+        "github_pr_url" => p["github_pr_url"],
+        "diff_content" => p["diff_content"],
+        "affected_file" => p["affected_file"],
+        "merge_status" => p["merge_status"] || (autonomous ? "not_applicable" : "merged"),
+        "merge_commit_sha" => p["merge_commit_sha"],
+        "sre_bridge_action" => p["sre_bridge_action"],
+        "sre_bridge_status" => p["sre_bridge_status"] || result.bridge_status,
+        "sre_bridge_output" => p["sre_bridge_output"] || result.bridge_output
       }
     end
   end
