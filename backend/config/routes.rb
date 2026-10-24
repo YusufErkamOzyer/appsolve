@@ -3,7 +3,9 @@ Rails.application.routes.draw do
 
   namespace :api do
     namespace :v1 do
+      get "status_page", to: "status_page#show"
       resources :services, only: [:index, :show]
+      resources :status_updates, only: [:index]
       resources :incidents, only: [:index, :show] do
         member do
           post :approve_plan

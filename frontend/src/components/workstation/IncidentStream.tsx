@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useState, useRef, useEffect } from "react";
+import Link from "next/link";
 import { Incident, sendWarRoomMessage } from "@/lib/api";
 import { SlaCountdown } from "./SlaCountdown";
 import { ActionCard } from "./ActionCard";
@@ -184,6 +185,16 @@ export function IncidentStream({
 
           <span className="text-[#522D60]/30">|</span>
           <span className="text-[#80426E]">{timeStr}</span>
+
+          <span className="text-[#522D60]/30">|</span>
+          <Link
+            href="/status"
+            className="hover:underline text-[#522D60] font-bold inline-flex items-center gap-1 text-[10px] bg-[#FAF6F2] px-1.5 py-0.5 border border-[#522D60]"
+            title="Müşteri Durum Sayfasını Görüntüle"
+          >
+            <span className="w-1.5 h-1.5 bg-[#1E8E5A] rounded-full" />
+            <span>Müşteri Sayfası (/status)</span>
+          </Link>
         </div>
       </div>
 

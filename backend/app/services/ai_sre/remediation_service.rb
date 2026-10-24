@@ -118,6 +118,9 @@ module AiSre
       @incident.update!(status: "resolved", resolved_at: Time.current)
       @service.recalculate_status! if @service.present?
 
+      # Müşteri Durum Sayfası ve Mobil Bildirimi (Çözüldü)
+      AiSre::CustomerCommunicationService.publish_resolved!(@incident)
+
       # Otomatik Post-Mortem Raporu Üretimi (PostMortem 1.1)
       AiSre::PostMortemGenerator.generate!(@incident)
 
@@ -210,6 +213,9 @@ module AiSre
       @incident.update!(status: "resolved", resolved_at: Time.current)
       @service.recalculate_status! if @service.present?
 
+      # Müşteri Durum Sayfası ve Mobil Bildirimi (SEV-3 Otonom Çözüm)
+      AiSre::CustomerCommunicationService.publish_autonomous_resolution!(@incident)
+
       # Otomatik Post-Mortem Raporu Üretimi (PostMortem 1.1)
       AiSre::PostMortemGenerator.generate!(@incident)
     end
@@ -245,6 +251,9 @@ module AiSre
         details: "Nöbetçi mühendisin tek tıkla onaylayabileceği çözüm planı War Room'da hazırlandı.",
         occurred_at: Time.current
       )
+
+      # Müşteri Durum Sayfası ve Mobil Bildirimi (Sorun Tespit Edildi / Müdahale Hazırlandı)
+      AiSre::CustomerCommunicationService.publish_identified!(@incident)
     end
 
     # Yol C (SEV-1): AI Hipotez, Hata Açıklaması ve Tek Tıkla İnteraktif İmplementasyon Planı
@@ -289,6 +298,9 @@ module AiSre
         details: "Nöbetçi Mühendis ve Takım Lideri için canlı kriz odası açıldı. @solver ilk müdahale planını sundu.",
         occurred_at: Time.current
       )
+
+      # Müşteri Durum Sayfası ve Mobil Bildirimi (Sorun Tespit Edildi / Kurtarma Planı Hazırlandı)
+      AiSre::CustomerCommunicationService.publish_identified!(@incident)
     end
 
     def build_action_card_payload(result:, approved_by: nil, autonomous: false, plan: nil)

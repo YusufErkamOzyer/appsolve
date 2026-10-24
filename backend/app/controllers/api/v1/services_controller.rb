@@ -4,10 +4,12 @@ module Api
       def index
         services = Service.all.order(:id)
         system_status = Service.system_health_status
+        updates = StatusUpdate.visible_to_public.limit(25)
 
         render json: {
           system_status: system_status,
           system_status_label: status_label(system_status),
+          system_status_description: status_description(system_status),
           last_synced_at: Time.current.iso8601,
           services: services.map do |s|
             {
@@ -29,7 +31,8 @@ module Api
                 status: s.active_incident.status
               } : nil
             }
-          end
+          end,
+          status_updates: updates.map(&:as_public_json)
         }
       end
 
@@ -48,6 +51,19 @@ module Api
         when "partial_outage" then "Kısmi Performans Kaybı"
         when "major_outage" then "Kritik Sistem Kesintisi"
         else "Bilinmeyen Durum"
+        end
+      end
+
+      def status_description(status)
+        case status
+        when "all_operational"
+          "Tüm mobil ve web servislerimiz kesintisiz ve yüksek performansla hizmet vermektedir. Altyapı telemetrisi gerçek zamanlı doğrulanmaktadır."
+        when "partial_outage"
+          "Bazı servislerimizde performans kaybı veya inceleme süreci devam etmektedir. Teknik ekibimiz durumu takip etmektedir."
+        when "major_outage"
+          "Kritik servis kesintisi tespit edilmiştir. Acil müdahale ve kurtarma çalışmaları devam etmektedir."
+        else
+          "Sistem durumu kontrol edilmektedir."
         end
       end
 
