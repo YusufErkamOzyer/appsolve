@@ -36,3 +36,8 @@ backend/public/assets/
 .idea/
 *.swp
 *.swo
+
+# QuickCart Standalone Subsystem Repo
+quickcart/
+.agents/
+backend/.env

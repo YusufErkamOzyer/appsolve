@@ -60,6 +60,21 @@ export interface ActionCardPayload {
   estimated_duration?: string;
   impact_scope?: string;
   guardrail_status?: string;
+
+  // GitHub Remediation fields (R3 / R4)
+  github_branch?: string;
+  github_branch_url?: string;
+  github_pr_number?: number;
+  github_pr_url?: string;
+  diff_content?: string;
+  affected_file?: string;
+  merge_status?: 'pending' | 'merged' | 'not_applicable';
+  merge_commit_sha?: string;
+
+  // Remote SRE Bridge fields
+  sre_bridge_action?: string;
+  sre_bridge_status?: string;
+  sre_bridge_output?: string;
 }
 
 export interface WarRoomMessage {
@@ -289,12 +304,13 @@ export async function sendWarRoomMessage(
 export async function approveIncidentPlan(
   incidentId: number,
   approvedBy: string = "Nöbetçi Mühendis (On-Call SRE)",
-  planId?: string
+  planId?: string,
+  messageId?: number
 ): Promise<PlanActionResponse> {
   const res = await fetch(`${API_BASE}/incidents/${incidentId}/approve_plan`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ approved_by: approvedBy, plan_id: planId })
+    body: JSON.stringify({ approved_by: approvedBy, plan_id: planId, message_id: messageId })
   });
 
   const data = await res.json();

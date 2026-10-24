@@ -5,12 +5,21 @@ module Api
         services = Service.all.order(:id)
         system_status = Service.system_health_status
         updates = StatusUpdate.visible_to_public.limit(25)
+        active_incident = Incident.where.not(status: "resolved").order(created_at: :desc).first
 
         render json: {
           system_status: system_status,
           system_status_label: status_label(system_status),
           system_status_description: status_description(system_status),
           last_synced_at: Time.current.iso8601,
+          active_incident: active_incident ? {
+            id: active_incident.id,
+            incident_code: active_incident.incident_code,
+            title: active_incident.title,
+            severity: active_incident.severity,
+            status: active_incident.status,
+            service_slug: active_incident.service&.slug
+          } : nil,
           services: services.map do |s|
             {
               id: s.id,

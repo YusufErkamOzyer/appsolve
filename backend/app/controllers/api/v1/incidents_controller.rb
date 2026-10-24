@@ -161,6 +161,16 @@ module Api
           hypothesis: inc.hypothesis,
           reasoning: inc.reasoning,
           recommended_action_plan: inc.recommended_action_plan,
+          action_card: (
+            latest_card = inc.war_room_messages.to_a.reverse.find { |m| m.message_type == "action_card" }
+            (latest_card&.action_card_payload.presence || inc.recommended_action_plan || {}).slice(
+              "plan_id", "title", "tool_name", "risk_level", "hypothesis", "reasoning", "steps",
+              "github_branch", "github_branch_url", "github_pr_number", "github_pr_url",
+              "diff_content", "affected_file", "merge_status", "merge_commit_sha",
+              "sre_bridge_action", "sre_bridge_status", "sre_bridge_output",
+              "terminal_output", "verification_summary", "approved_by", "executed_at", "autonomous"
+            )
+          ),
           raw_payload: inc.raw_payload,
           sla_deadline: inc.sla_deadline&.iso8601,
           resolved_at: inc.resolved_at&.iso8601,
