@@ -4,6 +4,7 @@ import React, { useEffect, useState, useCallback, useRef, useMemo } from "react"
 import { OsNavbar } from "@/components/os/OsNavbar";
 import { IncidentSidebar } from "@/components/workstation/IncidentSidebar";
 import { IncidentStream } from "@/components/workstation/IncidentStream";
+import { RetroThinkingOrb } from "@/components/workstation/RetroThinkingOrb";
 import { SignalSimulatorModal } from "@/components/workstation/SignalSimulatorModal";
 import {
   fetchServices,
@@ -111,6 +112,101 @@ export default function CommandWorkstationPage() {
     [activeIncidents]
   );
 
+  // Sol Alt AI Loading Orb State Hesaplaması:
+  const isSelectedAiActive = useMemo(() => {
+    if (!selectedIncident) return false;
+    const stage = selectedIncident.ai_stage;
+    if (!stage) return selectedIncident.status === "investigating" && !selectedIncident.severity;
+    return stage !== "completed" && stage !== "awaiting_approval";
+  }, [selectedIncident]);
+
+  const orbStatus = useMemo(() => {
+    if (!selectedIncident) {
+      return {
+        isActive: false,
+        stageLabel: "@SOLVER NÖBETTE",
+        badgeText: "● HAZIR",
+        statusText: "Sistem telemetrisi izleniyor — SRE ajanı hazırda bekliyor.",
+      };
+    }
+
+    const stage = selectedIncident.ai_stage;
+    const isResolved = selectedIncident.status === "resolved";
+
+    if (isSelectedAiActive) {
+      let label = "@SOLVER İŞLEMİ";
+      if (
+        stage === "jev_categorizing" ||
+        (!selectedIncident.severity && selectedIncident.status === "investigating")
+      ) {
+        label = "@SOLVER ÖN ANALİZ";
+      } else if (stage === "ai_analyzing") {
+        label = "@SOLVER KÖK NEDEN ANALİZİ";
+      } else if (stage === "ai_preparing_plan") {
+        label = "@SOLVER PLAN HAZIRLIĞI";
+      } else if (stage === "ai_inspecting_locks") {
+        label = "@SOLVER KİLİT TARAMASI";
+      } else if (stage === "ai_autonomous_solving") {
+        label = "@SOLVER OTONOM MÜDAHALE";
+      } else if (stage === "ai_preparing_patch") {
+        label = "@SOLVER KOD ONARIM MOTORU";
+      } else if (stage === "ai_executing_plan") {
+        label = "@SOLVER İMPLEMENTASYON İCRASI";
+      } else if (stage === "writing_post_mortem") {
+        label = "@SOLVER RAPORLAMA MOTORU";
+      }
+
+      return {
+        isActive: true,
+        stageLabel: label,
+        badgeText: "● İŞLENİYOR",
+        statusText:
+          selectedIncident.ai_status_text ||
+          "@solver aktif telemetri ve sistem analizini yürütüyor...",
+      };
+    }
+
+    // AI çalışmıyorken (durağan):
+    if (isResolved) {
+      return {
+        isActive: false,
+        stageLabel: "@SOLVER NÖBETTE",
+        badgeText: "✓ ÇÖZÜLDÜ",
+        statusText:
+          "Olay kapatıldı ve Post-Mortem hazır — @solver yeni telemetri sinyali bekliyor.",
+      };
+    }
+
+    if (stage === "awaiting_approval") {
+      const hasPr = Boolean(
+        selectedIncident.action_card?.github_pr_number ||
+          selectedIncident.recommended_action_plan?.github_pr_number ||
+          selectedIncident.messages?.some(
+            (m) =>
+              m.message_type === "action_card" &&
+              m.action_card_payload?.github_pr_number
+          )
+      );
+      return {
+        isActive: false,
+        stageLabel: "@SOLVER BEKLEMEDE",
+        badgeText: "● ONAY BEKLİYOR",
+        statusText: hasPr
+          ? "Düzeltme PR'ı açıldı — Nöbetçi mühendisin birleştirme onayı bekleniyor."
+          : "İmplementasyon planı hazırlandı — Nöbetçi mühendis onayı bekleniyor.",
+      };
+    }
+
+    return {
+      isActive: false,
+      stageLabel: "@SOLVER BEKLEMEDE",
+      badgeText: "● BEKLEMEDE",
+      statusText:
+        selectedIncident.ai_status_text ||
+        "Sistem gözlem altında — @solver bir sonraki komutu bekliyor.",
+    };
+  }, [selectedIncident, isSelectedAiActive]);
+
   return (
     <div className="flex flex-col min-h-screen bg-[#FAF6F2]">
       {/* 1. Full-Width Single Dark Ink Top Bar */}
@@ -137,13 +233,27 @@ export default function CommandWorkstationPage() {
           </div>
         )}
 
-        {/* Left Panel: AKTİF OLAYLAR (IncidentSidebar) */}
-        <IncidentSidebar
-          incidents={incidents}
-          selectedIncidentId={selectedIncident?.id || null}
-          onSelectIncident={(inc) => setSelectedIncidentId(inc.id)}
-          onOpenSimulator={() => setIsSimulatorOpen(true)}
-        />
+        {/* Left Column: AKTİF OLAYLAR & SOL ALT AI ORB PANELİ */}
+        <aside className="w-full lg:w-[350px] xl:w-[380px] shrink-0 flex flex-col gap-3 sm:gap-4 lg:h-[calc(100vh-80px)] select-none">
+          {/* Top Panel: AKTİF OLAYLAR (IncidentSidebar) */}
+          <IncidentSidebar
+            incidents={incidents}
+            selectedIncidentId={selectedIncident?.id || null}
+            onSelectIncident={(inc) => setSelectedIncidentId(inc.id)}
+            onOpenSimulator={() => setIsSimulatorOpen(true)}
+            className="flex-1 min-h-[220px]"
+          />
+
+          {/* Bottom Panel: SOL ALT AI DURUMU & ORB (RetroThinkingOrb) */}
+          <RetroThinkingOrb
+            isActive={orbStatus.isActive}
+            stageLabel={orbStatus.stageLabel}
+            badgeText={orbStatus.badgeText}
+            statusText={orbStatus.statusText}
+            compact
+            className="shrink-0"
+          />
+        </aside>
 
         {/* Right Panel: OLAY AKIŞI (IncidentStream) */}
         <IncidentStream

@@ -58,7 +58,7 @@ module AiSre
         root_cause_note = nil
       end
 
-      clean_code = @incident.incident_code.to_s.downcase.gsub(/[^a-z0-9]+/, "-")
+      clean_code = @incident.incident_code.to_s.downcase.gsub(/[^a-z0-9]+/, "-").sub(/^-+/, "").sub(/-+$/, "")
       branch_name = "appsolve/fix-#{clean_code}-coupon-calc"
       pr_body = build_pr_body(source_file, unified_diff, root_cause_note)
 
@@ -121,6 +121,10 @@ module AiSre
         next if path.start_with?("backend/") || path.start_with?("quickcart/")
         begin
           res = @git_provider.get_file(alt_path, ref: "main")
+          # Only use alt_path if it was actually found in commits or on disk, not from fallback
+          if @git_provider.is_a?(AiSre::LocalGitProvider) && !@git_provider.send(:find_file_on_disk, alt_path)
+            next
+          end
           return [alt_path, res[:content].to_s]
         rescue GitProvider::ResourceNotFoundError
           # Continue to next candidate

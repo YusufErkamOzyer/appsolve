@@ -38,6 +38,9 @@ export interface RecommendedActionPlan {
   tool_name?: string;
   risk_level?: "low" | "medium" | "high" | string;
   steps?: string[];
+  github_pr_number?: number;
+  github_pr_url?: string;
+  github_branch?: string;
 }
 
 export type ActionStatus = "pending" | "autonomous_executed" | "executed" | "plan_approved" | "rejected" | "locked";
@@ -114,6 +117,7 @@ export interface Incident {
   hypothesis: string | null;
   reasoning: string | null;
   recommended_action_plan?: RecommendedActionPlan | null;
+  action_card?: ActionCardPayload | null;
   raw_payload?: Record<string, unknown>;
   sla_deadline: string | null;
   resolved_at: string | null;

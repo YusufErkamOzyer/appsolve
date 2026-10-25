@@ -8,6 +8,7 @@ interface IncidentSidebarProps {
   selectedIncidentId: number | null;
   onSelectIncident: (incident: Incident) => void;
   onOpenSimulator?: () => void;
+  className?: string;
 }
 
 export function IncidentSidebar({
@@ -15,6 +16,7 @@ export function IncidentSidebar({
   selectedIncidentId,
   onSelectIncident,
   onOpenSimulator,
+  className = "",
 }: IncidentSidebarProps) {
   const [sevFilter, setSevFilter] = useState<"all" | "SEV-1" | "SEV-2" | "SEV-3">("all");
 
@@ -58,7 +60,11 @@ export function IncidentSidebar({
   };
 
   return (
-    <aside className="w-full lg:w-[350px] xl:w-[380px] shrink-0 border-[1.5px] border-[#522D60] bg-[#FFFFFF] os-window-shadow flex flex-col h-full min-h-[580px] lg:max-h-[calc(100vh-80px)] select-none">
+    <div
+      className={`border-[1.5px] border-[#522D60] bg-[#FFFFFF] os-window-shadow flex flex-col min-h-[240px] select-none ${
+        className || "w-full lg:w-[350px] xl:w-[380px] shrink-0 h-full lg:max-h-[calc(100vh-80px)]"
+      }`}
+    >
       {/* 1. Header Bar */}
       <div className="h-9 px-3 border-b-[1.5px] border-[#522D60] bg-[#FFFFFF] flex items-center justify-between font-mono text-[11px]">
         <div className="flex items-center gap-2 font-bold text-[#522D60]">
@@ -237,6 +243,6 @@ export function IncidentSidebar({
           })
         )}
       </div>
-    </aside>
+    </div>
   );
 }

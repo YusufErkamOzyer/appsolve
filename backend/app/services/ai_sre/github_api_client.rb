@@ -49,6 +49,8 @@ module AiSre
         post_request("/repos/#{@repo}/git/refs", body)
       rescue GitProvider::ApiError => e
         if e.message.include?("Reference already exists")
+          # Force reset existing branch to base commit so it never has stale conflicting commits
+          patch_request("/repos/#{@repo}/git/refs/heads/#{clean_branch}", { sha: base_sha, force: true }) rescue nil
           get_request("/repos/#{@repo}/git/ref/heads/#{clean_branch}")
         else
           raise
@@ -157,6 +159,10 @@ module AiSre
 
     def put_request(path, body)
       execute_request(Net::HTTP::Put, path, body)
+    end
+
+    def patch_request(path, body)
+      execute_request(Net::HTTP::Patch, path, body)
     end
 
     def execute_request(klass, path, body = nil)
