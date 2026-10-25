@@ -35,8 +35,9 @@ export function OsWindow({
         className={`h-7 px-2.5 flex items-center justify-between border-b-[1.5px] border-[#522D60] select-none ${headerVariantStyles}`}
       >
         <div className="flex items-center gap-2 overflow-hidden">
-          <span className="w-3.5 h-3.5 border border-current flex items-center justify-center text-[9px] font-mono leading-none">
-            ■
+          <span className="w-4 h-4 border border-current flex items-center justify-center p-0.5 overflow-hidden shrink-0">
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src="/appsolve-icon.png" alt="Window Icon" className="w-full h-full object-contain" />
           </span>
           <span className="font-mono text-[11px] font-semibold uppercase tracking-wider truncate">
             {title} <span className="opacity-80 font-normal">v{version}</span>

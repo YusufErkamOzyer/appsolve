@@ -205,6 +205,9 @@ module AiSre
         # QuickCart health check verification probe
         @bridge_client.health_check(incident_id: @incident.id)
 
+        # Otomatik Git Senkronizasyonu (Yaklaşım A): PR merge edildikten sonra lokal repo çalışma alanını hizala
+        align_local_git_repo!(target_file)
+
       elsif plan["tool_name"].to_s.include?("kill_db_locks")
         # R3: SEV-1 Database Deadlock Resolution via Bridge
         bridge_res = @bridge_client.kill_db_locks(incident_id: @incident.id)
@@ -520,6 +523,42 @@ module AiSre
         "sre_bridge_status" => p["sre_bridge_status"] || result.bridge_status,
         "sre_bridge_output" => p["sre_bridge_output"] || result.bridge_output
       }
+    end
+
+    def align_local_git_repo!(target_file)
+      # QuickCart reposu yerel diskte mevcut mu?
+      possible_dirs = [
+        Rails.root.join("..", "quickcart").to_s,
+        ENV["QUICKCART_LOCAL_REPO_PATH"],
+        Rails.root.join("..").to_s
+      ].compact
+
+      repo_dir = possible_dirs.find { |d| File.directory?(File.join(d, ".git")) }
+      return unless repo_dir
+
+      clean_file = target_file.to_s.sub(%r{^/+}, "")
+      rel_candidates = [
+        clean_file,
+        "backend/#{clean_file}",
+        "quickcart/backend/#{clean_file}",
+        clean_file.sub(%r{^quickcart/}, "")
+      ]
+      actual_rel = rel_candidates.find { |f| File.exist?(File.join(repo_dir, f)) } || clean_file
+
+      # 1. Remote main branch'ini fetch et
+      fetch_ok = system("git", "-C", repo_dir, "fetch", "origin", "main", err: File::NULL, out: File::NULL)
+      return unless fetch_ok
+
+      # 2. sync_source ile diske yazılmış uncommitted değişikliği checkout ile temizle
+      system("git", "-C", repo_dir, "checkout", "--", actual_rel, err: File::NULL, out: File::NULL)
+
+      # 3. Remote main merge commit'ini fast-forward ile çek ve çalışma alanını temizle
+      pull_ok = system("git", "-C", repo_dir, "pull", "--ff-only", "origin", "main", err: File::NULL, out: File::NULL)
+      if pull_ok
+        Rails.logger.info("[RemediationService] Local git repository at #{repo_dir} automatically aligned with remote main.")
+      end
+    rescue StandardError => e
+      Rails.logger.warn("[RemediationService] align_local_git_repo! error: #{e.message}")
     end
   end
 end
