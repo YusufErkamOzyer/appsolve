@@ -1,0 +1,31 @@
+checkout:
+  name: "Ödeme"
+  name_en: "Checkout & Payment"
+  slug: "checkout"
+  status: "operational"
+  uptime_percentage: 99.97
+  description: "Ödeme ağ geçidi"
+
+cart:
+  name: "Sepet"
+  name_en: "Shopping Cart"
+  slug: "cart"
+  status: "operational"
+  uptime_percentage: 99.98
+  description: "Sepet ve promosyon"
+
+catalog:
+  name: "Katalog"
+  name_en: "Product Catalog"
+  slug: "catalog"
+  status: "operational"
+  uptime_percentage: 99.95
+  description: "Ürün kataloğu"
+
+auth:
+  name: "Giriş"
+  name_en: "Authentication"
+  slug: "auth"
+  status: "operational"
+  uptime_percentage: 99.99
+  description: "Giriş servisi"

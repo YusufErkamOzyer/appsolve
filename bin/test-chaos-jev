@@ -1,0 +1,447 @@
+#!/usr/bin/env bash
+# ==============================================================================
+# TypeSafe Jev (System One) Chaos Severity & Categorization Inference Evaluation
+# ONLY TypeSafe Jev API is called. Gemini API calls are strictly forbidden / blocked.
+# ==============================================================================
+set -e
+
+cd "$(dirname "$0")/../backend"
+
+bin/rails runner '
+  require "json"
+
+  # 1. HARD GUARDRAIL: Block any and all calls to Google Gemini API
+  if defined?(AiSre::GeminiClient)
+    AiSre::GeminiClient.class_eval do
+      def analyze_signal(*)
+        raise "[SECURITY VIOLATION] Gemini API was invoked during Jev-only evaluation test!"
+      end
+      def call_gemini_api(*)
+        raise "[SECURITY VIOLATION] Gemini API was invoked during Jev-only evaluation test!"
+      end
+    end
+  end
+
+  # Intercept HTTP to count exact endpoints called and enforce Gemini ban
+  jev_calls_count = 0
+  gemini_calls_count = 0
+
+  original_request = Net::HTTP.instance_method(:request)
+  Net::HTTP.define_method(:request) do |req, *args, &block|
+    host = self.address.to_s
+    if host.include?("googleapis.com") || host.include?("gemini")
+      gemini_calls_count += 1
+      raise "[GUARDRAIL ERROR] Gemini API call blocked: #{host}#{req.path}"
+    elsif host.include?("typesafe.ai")
+      jev_calls_count += 1
+    end
+    original_request.bind(self).call(req, *args, &block)
+  end
+
+  client = AiSre::TypesafeJevClient.new
+  unless client.configured?
+    puts "\e[31m[ERROR] TypeSafe Jev API is not configured or TYPESAFE_API_KEY is missing!\e[0m"
+    exit 1
+  end
+
+  puts "\e[1;36m"
+  puts "================================================================================="
+  puts "   TYPESAFE JEV (SYSTEM ONE) - CHAOS SEV INFERENCE & ACCURACY BENCHMARK"
+  puts "   Mod: SADECE TypeSafe Jev API | Gemini API: KESİNLİKLE KAPALI (0 Çağrı)"
+  puts "   Hedef Model: #{ENV.fetch("TYPESAFE_MODEL", "jev-latest")} | Endpoint: api.typesafe.ai"
+  puts "================================================================================="
+  puts "\e[0m"
+
+  services = {
+    "checkout" => Service.find_by(slug: "checkout") || Service.new(slug: "checkout", name: "Checkout Service", description: "Payment and checkout transactions"),
+    "cart"     => Service.find_by(slug: "cart") || Service.new(slug: "cart", name: "Shopping Cart Service", description: "Cart operations and coupon calculations"),
+    "catalog"  => Service.find_by(slug: "catalog") || Service.new(slug: "catalog", name: "Product Catalog Service", description: "Product catalog and cached items"),
+    "auth"     => Service.find_by(slug: "auth") || Service.new(slug: "auth", name: "Auth & Identity Service", description: "User session authentication and token validation")
+  }
+
+  scenarios = [
+    # -------------------------------------------------------------------------
+    # GRUP 1: SEV-1 CHAOS (Kritik Kesinti - Checkout & DB Kilitlenmeleri)
+    # -------------------------------------------------------------------------
+    {
+      id: "CHAOS-SEV1-01",
+      group: "SEV-1 (Kritik Kesinti)",
+      name: "QuickCart Deadlock: payment_records kilit zaman aşımı (PID: 4821)",
+      service_slug: "checkout",
+      expected_sev: "SEV-1",
+      expected_category: "database_deadlock",
+      expected_tool: "kill_db_locks_and_failover",
+      payload: {
+        error_code: "ERR_DB_LOCK_TIMEOUT",
+        message: "SQLITE_BUSY: database is locked (lock timeout on payment_records)",
+        raw_payload: {
+          stack_trace: "Error: SQLITE_BUSY: database is locked (lock timeout on payment_records)\n    at CheckoutService.processCheckout (/quickcart/backend/src/services/checkout.service.ts:31:25)\n    at /quickcart/backend/src/routes/checkout.ts:9:59",
+          source_file: "src/services/checkout.service.ts",
+          line_number: 31,
+          context: { method: "POST", path: "/api/checkout", blocking_pid: 4821, table: "payment_records" }
+        },
+        metrics: { error_rate: 0.92, p99_latency_ms: 5400 }
+      }
+    },
+    {
+      id: "CHAOS-SEV1-02",
+      group: "SEV-1 (Kritik Kesinti)",
+      name: "İşlem PID 4821 deadlock sepet ödeme akışını durdurdu",
+      service_slug: "checkout",
+      expected_sev: "SEV-1",
+      expected_category: "database_deadlock",
+      expected_tool: "kill_db_locks_and_failover",
+      payload: {
+        error_code: "ERR_DB_DEADLOCK",
+        message: "Database transaction deadlock detected: table payment_records locked waiting on PID 4821",
+        raw_payload: {
+          stack_trace: "DeadlockError: transaction deadlock detected on payment_records\n    at acquirePaymentRowLock (/quickcart/backend/src/db/locks.ts:38:11)\n    at Object.lockCheckout (/quickcart/backend/src/db/locks.ts:74:5)",
+          source_file: "quickcart/backend/src/db/locks.ts",
+          line_number: 38,
+          context: { blocking_pid: 4821, table: "payment_records" }
+        },
+        metrics: { error_rate: 1.0, active_locks: 1 }
+      }
+    },
+    {
+      id: "CHAOS-SEV1-03",
+      group: "SEV-1 (Kritik Kesinti)",
+      name: "Checkout HTTP 504 Gateway Timeout ve %95 işlem hatası",
+      service_slug: "checkout",
+      expected_sev: "SEV-1",
+      expected_category: "database_deadlock",
+      expected_tool: "kill_db_locks_and_failover",
+      payload: {
+        error_code: "ERR_DB_LOCK_TIMEOUT",
+        message: "HTTP 504 Gateway Timeout: database lock contention on /api/checkout preventing order completions",
+        raw_payload: {
+          stack_trace: "TimeoutError: query timeout exceeded 5000ms waiting for lock on payment_records\n    at Connection.query (/quickcart/backend/node_modules/better-sqlite3/lib/methods.js:42:10)",
+          source_file: "src/services/checkout.service.ts",
+          line_number: 45,
+          context: { method: "POST", path: "/api/checkout", status: 504 }
+        },
+        metrics: { error_rate: 0.95, failed_requests: 184, successful_requests: 6 }
+      }
+    },
+    {
+      id: "CHAOS-SEV1-04",
+      group: "SEV-1 (Kritik Kesinti)",
+      name: "Flaş İndirim Yüksek Eşzamanlılık Kilit Çekişmesi (Deadlock Contention)",
+      service_slug: "checkout",
+      expected_sev: "SEV-1",
+      expected_category: "database_deadlock",
+      expected_tool: "kill_db_locks_and_failover",
+      payload: {
+        error_code: "ERR_DB_DEADLOCK_CONTENTION",
+        message: "Deadlock: transaction lock contention on payment_records and orders tables during high concurrency",
+        raw_payload: {
+          stack_trace: "Error: SQLITE_BUSY: database table payment_records locked waiting on PID 5012\n    at Transaction.commit (/quickcart/backend/src/db/index.ts:89:12)",
+          source_file: "src/db/index.ts",
+          line_number: 89,
+          context: { concurrent_checkouts: 120, blocked_transactions: 42 }
+        },
+        metrics: { error_rate: 0.88, p99_latency_ms: 6100 }
+      }
+    },
+
+    # -------------------------------------------------------------------------
+    # GRUP 2: SEV-2 CHAOS (Kısmi Özellik Hatası - Çalışma Zamanı Kod Hataları)
+    # -------------------------------------------------------------------------
+    {
+      id: "CHAOS-SEV2-01",
+      group: "SEV-2 (Kod Hatası)",
+      name: "QuickCart Kupon Hatası: TypeError: Cannot read properties of undefined (multiplier)",
+      service_slug: "cart",
+      expected_sev: "SEV-2",
+      expected_category: "application_code_bug",
+      expected_tool: "rollback_feature_flag",
+      payload: {
+        error_code: "ERR_COUPON_CALCULATION",
+        message: "TypeError: Cannot read properties of undefined (reading '\''multiplier'\'')",
+        raw_payload: {
+          stack_trace: "TypeError: Cannot read properties of undefined (reading '\''multiplier'\'')\n    at CartService.applyCoupon (/quickcart/backend/src/services/cart.service.ts:192:45)\n    at /quickcart/backend/src/routes/cart.ts:54:19",
+          source_file: "src/services/cart.service.ts",
+          line_number: 192,
+          context: { method: "POST", path: "/api/cart/apply-coupon", coupon_code: "SUMMER50" }
+        },
+        metrics: { error_rate: 0.28, coupon_failure_rate: 1.0 }
+      }
+    },
+    {
+      id: "CHAOS-SEV2-02",
+      group: "SEV-2 (Kod Hatası)",
+      name: "Kupon indirim hesaplamasında NaN matematik hesaplama hatası",
+      service_slug: "cart",
+      expected_sev: "SEV-2",
+      expected_category: "application_code_bug",
+      expected_tool: "rollback_feature_flag",
+      payload: {
+        error_code: "ERR_COUPON_CALCULATION",
+        message: "CalculationError: discount_amount evaluated to NaN on promotional tiered rate multiplier",
+        raw_payload: {
+          stack_trace: "Error: NaN math calculation on discount_amount = (100 * rateConfig.multiplier) / 100\n    at CartService.applyCoupon (/quickcart/backend/src/services/cart.service.ts:212:35)",
+          source_file: "src/services/cart.service.ts",
+          line_number: 212,
+          context: { coupon_code: "VIP2026", calculated_value: "NaN" }
+        },
+        metrics: { error_rate: 0.22 }
+      }
+    },
+    {
+      id: "CHAOS-SEV2-03",
+      group: "SEV-2 (Kod Hatası)",
+      name: "ReferenceError: promoConfig.tieredRates[coupon.tier] tanımsız",
+      service_slug: "cart",
+      expected_sev: "SEV-2",
+      expected_category: "application_code_bug",
+      expected_tool: "rollback_feature_flag",
+      payload: {
+        error_code: "ERR_COUPON_CALCULATION",
+        message: "TypeError: Cannot read properties of undefined (reading '\''VIP'\'') in tieredRates",
+        raw_payload: {
+          stack_trace: "TypeError: Cannot read properties of undefined (reading '\''VIP'\'')\n    at calculateCouponDiscount (/quickcart/backend/src/services/couponService.ts:42:28)\n    at CartService.applyCoupon (src/services/cart.service.ts:190:12)",
+          source_file: "src/services/couponService.ts",
+          line_number: 42
+        },
+        metrics: { error_rate: 0.25 }
+      }
+    },
+    {
+      id: "CHAOS-SEV2-04",
+      group: "SEV-2 (Kod Hatası)",
+      name: "Sepet promosyon çarpanında sıfıra bölme / geçersiz oran hatası",
+      service_slug: "cart",
+      expected_sev: "SEV-2",
+      expected_category: "application_code_bug",
+      expected_tool: "rollback_feature_flag",
+      payload: {
+        error_code: "ERR_PROMO_RUNTIME_BUG",
+        message: "RangeError: Invalid array length or division by zero in promotional tier calculator",
+        raw_payload: {
+          stack_trace: "RangeError: Invalid array length\n    at CartService.calculateTieredDiscounts (src/services/cart.service.ts:230:15)\n    at CartService.getCart (src/services/cart.service.ts:88:20)",
+          source_file: "src/services/cart.service.ts",
+          line_number: 230
+        },
+        metrics: { error_rate: 0.18 }
+      }
+    },
+
+    # -------------------------------------------------------------------------
+    # GRUP 3: SEV-3 CHAOS (Düşük Kritiklik - Önbellek Şişmesi / Bellek Baskısı)
+    # -------------------------------------------------------------------------
+    {
+      id: "CHAOS-SEV3-01",
+      group: "SEV-3 (Önbellek Şişmesi)",
+      name: "QuickCart Katalog Önbellek Şişmesi: 12,000 anahtar (%94 bellek baskısı)",
+      service_slug: "catalog",
+      expected_sev: "SEV-3",
+      expected_category: "cache_resource_bloat",
+      expected_tool: "flush_cache",
+      payload: {
+        error_code: "ERR_CACHE_BLOAT",
+        message: "Catalog in-memory cache bloat detected: 12000 keys (memory pressure 94%)",
+        raw_payload: {
+          bloat_count: 12000,
+          memory_mb: 480,
+          source_file: "src/services/catalog.service.ts",
+          line_number: 157,
+          context: { cache_keys: 12000, memory_pressure: "94%" }
+        },
+        metrics: { memory_pressure: 0.94, cache_entries: 12000 }
+      }
+    },
+    {
+      id: "CHAOS-SEV3-02",
+      group: "SEV-3 (Önbellek Şişmesi)",
+      name: "Resim & Küçük Resim Katalog Önbellek Eşiği Aşıldı (12,500 giriş)",
+      service_slug: "catalog",
+      expected_sev: "SEV-3",
+      expected_category: "cache_resource_bloat",
+      expected_tool: "flush_cache",
+      payload: {
+        error_code: "ERR_CACHE_BLOAT",
+        message: "Image and thumbnail catalog cache bloat exceeded watermark: 12,500 entries (memory pressure 94%)",
+        raw_payload: {
+          bloat_count: 12500,
+          memory_mb: 512,
+          source_file: "src/services/catalogCacheStore.ts",
+          line_number: 84
+        },
+        metrics: { memory_mb: 512, watermark_limit_mb: 400 }
+      }
+    },
+    {
+      id: "CHAOS-SEV3-03",
+      group: "SEV-3 (Önbellek Şişmesi)",
+      name: "Redis Katalog Anahtar Sızıntısı: 28,000 bayat anahtar (gezinti normal)",
+      service_slug: "catalog",
+      expected_sev: "SEV-3",
+      expected_category: "cache_resource_bloat",
+      expected_tool: "flush_cache",
+      payload: {
+        error_code: "ERR_CACHE_KEY_LEAK",
+        message: "Redis key watermark warning: 28,000 stale catalog product query cache keys",
+        raw_payload: {
+          bloat_count: 28000,
+          memory_mb: 620,
+          source_file: "src/services/catalog.service.ts",
+          context: { redis_keys: 28000, browsing_operational: true, checkout_operational: true }
+        },
+        metrics: { memory_pressure: 0.89, error_rate: 0.01 }
+      }
+    },
+    {
+      id: "CHAOS-SEV3-04",
+      group: "SEV-3 (Önbellek Şişmesi)",
+      name: "Bayat Küçük Resim Önbellek Şişmesi Uyarısı: 8,500 giriş (hafif gecikme)",
+      service_slug: "catalog",
+      expected_sev: "SEV-3",
+      expected_category: "cache_resource_bloat",
+      expected_tool: "flush_cache",
+      payload: {
+        error_code: "ERR_CACHE_BLOAT",
+        message: "Stale thumbnail cache bloat warning: 8,500 entries causing minor latency elevation",
+        raw_payload: {
+          bloat_count: 8500,
+          memory_mb: 390,
+          source_file: "src/services/catalog.service.ts",
+          line_number: 160
+        },
+        metrics: { memory_pressure: 0.82, p99_latency_ms: 180 }
+      }
+    },
+
+    # -------------------------------------------------------------------------
+    # GRUP 4: AYIRT EDİCİLİK & KİMLİK DOĞRULAMA (Auth Scenarios)
+    # -------------------------------------------------------------------------
+    {
+      id: "CHAOS-AUTH-01",
+      group: "Auth Kritik Kesinti",
+      name: "Kimlik Doğrulama Servisi Küme Bağlantısı Kesintisi (Girişler İmkansız)",
+      service_slug: "auth",
+      expected_sev: "SEV-1",
+      expected_category: "auth_session_failure",
+      expected_tool: "rollback_feature_flag",
+      payload: {
+        error_code: "ERR_AUTH_TOTAL_OUTAGE",
+        message: "Auth database cluster connection refused: all login and token verification endpoints failing",
+        raw_payload: {
+          stack_trace: "ConnectionRefusedError: auth-db.internal:5432 unreachable\n    at AuthService.authenticate (/quickcart/backend/src/services/auth.service.ts:55:10)",
+          source_file: "src/services/auth.service.ts",
+          line_number: 55,
+          context: { auth_endpoint: "/api/auth/login", status: 503 }
+        },
+        metrics: { error_rate: 0.98, auth_failure_rate: 1.0 }
+      }
+    },
+    {
+      id: "CHAOS-AUTH-02",
+      group: "Auth Oturum Hatası",
+      name: "Oturum Yenileme Çerezi Süre Aşımı (TokenExpiredError)",
+      service_slug: "auth",
+      expected_sev: "SEV-2",
+      expected_category: "auth_session_failure",
+      expected_tool: "rollback_feature_flag",
+      payload: {
+        error_code: "ERR_TOKEN_EXPIRED",
+        message: "TokenExpiredError: jwt expired on optional remember-me cookie while browsing",
+        raw_payload: {
+          stack_trace: "TokenExpiredError: jwt expired\n    at AuthService.verifyToken (/quickcart/backend/src/services/auth.service.ts:40:12)",
+          source_file: "src/services/auth.service.ts",
+          line_number: 40,
+          context: { auth_endpoint: "/api/auth/verify", token_expired_count: 12 }
+        },
+        metrics: { auth_failure_rate: 0.12 }
+      }
+    }
+  ]
+
+  results = []
+  latencies = []
+  sev_confusion = Hash.new { |h, k| h[k] = Hash.new(0) }
+  cat_confusion = Hash.new { |h, k| h[k] = Hash.new(0) }
+
+  scenarios.each do |scen|
+    svc = services[scen[:service_slug]]
+    
+    t0 = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+    decision = client.categorize_signal(service: svc, raw_payload: scen[:payload])
+    t1 = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+    duration_ms = ((t1 - t0) * 1000).round(1)
+    latencies << duration_ms
+
+    sev_match = (decision[:severity] == scen[:expected_sev])
+    cat_match = (decision[:category] == scen[:expected_category])
+    tool_match = (decision[:tool_name] == scen[:expected_tool])
+
+    sev_confusion[scen[:expected_sev]][decision[:severity]] += 1
+    cat_confusion[scen[:expected_category]][decision[:category]] += 1
+
+    status_badge = (sev_match && cat_match && tool_match) ? "\e[32m✔ PASS\e[0m" : (sev_match ? "\e[33m▲ PARTIAL (SEV Eşleşti)\e[0m" : "\e[31m✖ FAIL\e[0m")
+
+    puts "---------------------------------------------------------------------------------"
+    puts "[\e[1m#{scen[:id]}\e[0m] #{scen[:name]} | #{status_badge} (#{duration_ms}ms)"
+    puts "  Grup:       #{scen[:group]}"
+    puts "  Servis:     #{scen[:service_slug]}"
+    puts "  Beklenen:   SEV: #{scen[:expected_sev]} | Kategori: #{scen[:expected_category]} | Rota: #{scen[:expected_tool]}"
+    puts "  Jev Çıktı:  SEV: \e[1;#{sev_match ? 32 : 31}m#{decision[:severity]}\e[0m | Kategori: \e[1;#{cat_match ? 32 : 31}m#{decision[:category]}\e[0m | Rota: #{decision[:tool_name]}"
+    puts "  Metrikler:  Model: #{decision[:model]} | Score: #{decision[:score]} | Güven: #{(decision[:confidence].to_f * 100).round(1)}%"
+    puts "  Olasılık:   P(blocks_checkout): #{decision.dig(:probabilities, :blocks_checkout_or_payment)} | P(code_bug): #{decision.dig(:probabilities, :is_runtime_code_exception)} | P(cache_bloat): #{decision.dig(:probabilities, :is_cache_or_memory_bloat)}"
+
+    results << {
+      scenario: scen,
+      decision: decision,
+      sev_match: sev_match,
+      cat_match: cat_match,
+      tool_match: tool_match,
+      duration_ms: duration_ms
+    }
+  end
+
+  # =============================================================================
+  # METRİK & İSTATİSTİK RAPORU
+  # =============================================================================
+  total_count = scenarios.size
+  sev_matches = results.count { |r| r[:sev_match] }
+  cat_matches = results.count { |r| r[:cat_match] }
+  tool_matches = results.count { |r| r[:tool_match] }
+  all_matches = results.count { |r| r[:sev_match] && r[:cat_match] && r[:tool_match] }
+
+  sev_accuracy = (sev_matches.to_f / total_count * 100).round(1)
+  cat_accuracy = (cat_matches.to_f / total_count * 100).round(1)
+  tool_accuracy = (tool_matches.to_f / total_count * 100).round(1)
+  total_accuracy = (all_matches.to_f / total_count * 100).round(1)
+
+  avg_latency = (latencies.sum / latencies.size).round(1)
+  p95_latency = latencies.sort[(latencies.size * 0.95).floor]
+
+  puts "\n\e[1;35m"
+  puts "================================================================================="
+  puts "                       TEST SONUÇLARI VE PERFORMANS RAPORU"
+  puts "================================================================================="
+  puts "\e[0m"
+
+  puts "  API Güvenlik & İzolasyon Doğrulaması:"
+  puts "    ✔ TypeSafe Jev API Canlı Çağrı Sayısı: \e[1;32m#{jev_calls_count}\e[0m"
+  puts "    ✔ Google Gemini API Çağrı Sayısı:      \e[1;32m#{gemini_calls_count} (TAMAMEN ENGELLENDİ / SIFIR ÇAĞRI)\e[0m"
+  puts ""
+  puts "  Doğruluk Oranları (Accuracy Matrix):"
+  puts "    ✔ SEV Çıkarım Doğruluğu:         \e[1;#{sev_accuracy == 100 ? 32 : 33}m#{sev_accuracy}%\e[0m (#{sev_matches}/#{total_count})"
+  puts "    ✔ Kategori Sınıflandırma:        \e[1;#{cat_accuracy == 100 ? 32 : 33}m#{cat_accuracy}%\e[0m (#{cat_matches}/#{total_count})"
+  puts "    ✔ Müdahale Aracı (Tool) Seçimi: \e[1;#{tool_accuracy == 100 ? 32 : 33}m#{tool_accuracy}%\e[0m (#{tool_matches}/#{total_count})"
+  puts "    ✔ Tam Matris Başarısı (Full):    \e[1;#{total_accuracy == 100 ? 32 : 33}m#{total_accuracy}%\e[0m (#{all_matches}/#{total_count})"
+  puts ""
+  puts "  Gecikme & Yanıt Süresi (Latency SLA):"
+  puts "    ✔ Ortalama Çağrı Süresi (Jev):   \e[1;36m#{avg_latency} ms\e[0m"
+  puts "    ✔ P95 Çağrı Süresi:              \e[1;36m#{p95_latency} ms\e[0m"
+  puts ""
+  puts "  SEV Karışıklık Matrisi (Confusion Matrix):"
+  ["SEV-1", "SEV-2", "SEV-3"].each do |expected|
+    row = ["SEV-1", "SEV-2", "SEV-3"].map { |pred| "#{pred}: #{sev_confusion[expected][pred]}" }.join(" | ")
+    puts "    Beklenen #{expected} => #{row}"
+  end
+  puts ""
+  puts "\e[1;32m=================================================================================\e[0m"
+  puts "\e[1;32m  🎉 JEV KAOS SEV ÇIKARIM VE SINIFLANDIRMA TESTİ %#{total_accuracy} BAŞARIYLA TAMAMLANDI!\e[0m"
+  puts "\e[1;32m=================================================================================\e[0m"
+'

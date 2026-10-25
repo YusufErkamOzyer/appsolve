@@ -4,9 +4,12 @@ Thumbs.db
 
 # Environment variables
 .env
+.env.*
 .env.local
 .env.*.local
 *.local
+backend/.env
+backend/.env.*
 
 # Node / Frontend
 node_modules/
@@ -36,3 +39,8 @@ backend/public/assets/
 .idea/
 *.swp
 *.swo
+
+# QuickCart Standalone Subsystem Repo
+quickcart/
+.agents/
+backend/.env

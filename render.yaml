@@ -1,0 +1,29 @@
+services:
+  - type: web
+    name: appsolve-backend
+    runtime: ruby
+    rootDir: backend
+    buildCommand: "./bin/render-build.sh"
+    startCommand: "./bin/render-start.sh"
+    healthCheckPath: /up
+    envVars:
+      - key: RAILS_ENV
+        value: production
+      - key: RAILS_LOG_TO_STDOUT
+        value: "true"
+      - key: CORS_ORIGINS
+        value: "*"
+      - key: SECRET_KEY_BASE
+        generateValue: true
+      - key: GEMINI_API_KEY
+        sync: false
+      - key: TYPESAFE_API_KEY
+        sync: false
+      - key: GITHUB_TOKEN
+        sync: false
+      - key: QUICKCART_REPO
+        sync: false
+      - key: QUICKCART_BRIDGE_URL
+        sync: false
+      - key: QUICKCART_BRIDGE_SECRET
+        value: "quickcart-sre-secret-token"
