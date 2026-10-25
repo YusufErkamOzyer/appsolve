@@ -58,7 +58,7 @@ module AiSre
         root_cause_note = nil
       end
 
-      clean_code = @incident.incident_code.to_s.downcase.gsub(/[^a-z0-9]+/, "-")
+      clean_code = @incident.incident_code.to_s.downcase.gsub(/[^a-z0-9]+/, "-").sub(/^-+/, "").sub(/-+$/, "")
       branch_name = "appsolve/fix-#{clean_code}-coupon-calc"
       pr_body = build_pr_body(source_file, unified_diff, root_cause_note)
 
