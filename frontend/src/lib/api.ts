@@ -205,7 +205,8 @@ export interface TelemetrySignalPayload {
   metadata?: Record<string, unknown>;
 }
 
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:3001/api/v1";
+const rawApiBase = (process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:3001/api/v1").replace(/\/$/, "");
+const API_BASE = rawApiBase.endsWith("/api/v1") ? rawApiBase : `${rawApiBase}/api/v1`;
 
 export async function fetchServices(): Promise<ServicesResponse> {
   const res = await fetch(`${API_BASE}/services`, {

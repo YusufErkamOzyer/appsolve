@@ -84,7 +84,13 @@ module AiSre
         @raw_payload["file"]
       ].compact
 
-      return candidates.first if candidates.first.present?
+      if candidates.first.present?
+        raw_candidate = candidates.first.to_s
+        if raw_candidate.start_with?("/") && raw_candidate.include?("/src/")
+          return "src/#{raw_candidate.split('/src/', 2).last}"
+        end
+        return raw_candidate
+      end
 
       # Parse from stack trace string
       stack_trace = @raw_payload.dig("raw_payload", "stack_trace") || @raw_payload["stack_trace"] || ""
@@ -109,14 +115,15 @@ module AiSre
         # Continue to alternative paths
       end
 
-      # 2. Try prefixing backend/ if path starts with src/
-      if !path.start_with?("backend/")
-        alt_path = "backend/#{path.sub(%r{^/+}, '')}"
+      # 2. Try prefixing quickcart/backend/ or backend/ if path starts with src/
+      clean_rel = path.sub(%r{^/+}, "")
+      [ "quickcart/backend/#{clean_rel}", "backend/#{clean_rel}" ].each do |alt_path|
+        next if path.start_with?("backend/") || path.start_with?("quickcart/")
         begin
           res = @git_provider.get_file(alt_path, ref: "main")
           return [alt_path, res[:content].to_s]
         rescue GitProvider::ResourceNotFoundError
-          # Continue to fallback
+          # Continue to next candidate
         end
       end
 

@@ -31,6 +31,8 @@ module AiSre
       req = Net::HTTP::Post.new(uri.request_uri)
       req["Content-Type"] = "application/json"
       req["Authorization"] = "Bearer #{@secret_token}"
+      req["ngrok-skip-browser-warning"] = "true"
+      req["Bypass-Tunnel-Reminder"] = "true"
 
       body_payload = {
         command: command.to_s,
