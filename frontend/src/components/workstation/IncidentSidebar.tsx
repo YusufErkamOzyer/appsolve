@@ -185,7 +185,7 @@ export function IncidentSidebar({
                     <span
                       className={`px-1.5 py-0.2 border border-[#522D60] font-bold text-[9px] uppercase ${badgeBg}`}
                     >
-                      {isUncategorized ? "⏳ JEV İNCELİYOR" : inc.severity}
+                      {isUncategorized ? "⏳ @SOLVER İNCELİYOR" : inc.severity}
                     </span>
                     {isResolved ? (
                       <span className="inline-flex items-center gap-1 text-[#1E8E5A] text-[9px] font-bold truncate">

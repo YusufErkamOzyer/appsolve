@@ -40,7 +40,7 @@ export interface RecommendedActionPlan {
   steps?: string[];
 }
 
-export type ActionStatus = "pending" | "autonomous_executed" | "executed" | "rejected" | "locked";
+export type ActionStatus = "pending" | "autonomous_executed" | "executed" | "plan_approved" | "rejected" | "locked";
 
 export interface ActionCardPayload {
   plan_id?: string;
@@ -60,6 +60,7 @@ export interface ActionCardPayload {
   estimated_duration?: string;
   impact_scope?: string;
   guardrail_status?: string;
+  plan_stage?: "plan_proposal" | "pr_review" | string;
 
   // GitHub Remediation fields (R3 / R4)
   github_branch?: string;

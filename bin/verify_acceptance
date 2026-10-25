@@ -158,8 +158,18 @@ async function runAcceptanceCriteria(options) {
     // Verify Appsolve generated a GitHub branch and PR per AC 2 requirements
     const incident = sigRes.body?.incident;
     const actionCard = incident?.action_card;
-    const githubBranch = actionCard?.github_branch || incident?.github_branch;
-    const githubPrNumber = actionCard?.github_pr_number || incident?.github_pr_number;
+    let githubBranch = actionCard?.github_branch || incident?.github_branch;
+    let githubPrNumber = actionCard?.github_pr_number || incident?.github_pr_number;
+
+    if (!githubBranch && actionCard?.plan_stage === 'plan_proposal') {
+      // 2-stage flow: Engineer approves plan proposal to generate branch & PR
+      const approveRes = await client.post(`/api/v1/incidents/${incident.id}/approve_plan`, {
+        approved_by: 'Nöbetçi Mühendis'
+      });
+      const updatedCard = approveRes.body?.incident?.action_card;
+      githubBranch = updatedCard?.github_branch;
+      githubPrNumber = updatedCard?.github_pr_number;
+    }
 
     if (githubBranch && githubPrNumber) {
       if (options.verbose) {

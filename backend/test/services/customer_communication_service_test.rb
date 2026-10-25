@@ -86,7 +86,8 @@ class CustomerCommunicationServiceTest < ActiveSupport::TestCase
     assert_includes phases, "investigating"
     assert_includes phases, "identified"
 
-    # Now approve plan
+    # Now approve plan (Stage 1: proposal -> PR; Stage 2: PR review -> merge & resolve)
+    AiSre::RemediationService.approve_plan!(incident)
     AiSre::RemediationService.approve_plan!(incident)
     incident.reload
 

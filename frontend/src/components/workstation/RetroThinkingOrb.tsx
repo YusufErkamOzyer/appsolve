@@ -31,8 +31,8 @@ const DY = Float32Array.from(DOT_LIST, (d) => d.y);
 const DZ = Float32Array.from(DOT_LIST, (d) => d.z);
 
 export function RetroThinkingOrb({
-  statusText = "Yapay zeka aktif kriz analizi yürütüyor...",
-  stageLabel = "@SOLVER AI MOTORU",
+  statusText = "@solver aktif kriz analizi yürütüyor...",
+  stageLabel = "@SOLVER",
   targetFps = TARGET_FPS,
   compact = false,
 }: RetroThinkingOrbProps) {
@@ -125,7 +125,7 @@ export function RetroThinkingOrb({
           <span className="tracking-wider">{stageLabel.toUpperCase()}</span>
         </div>
         <span className="px-1.5 py-0.2 bg-[#FFD38B] border border-[#522D60] font-bold text-[#522D60] text-[9px] uppercase">
-          ● İŞLENİYOR (12 FPS)
+          ● İŞLENİYOR
         </span>
       </div>
 

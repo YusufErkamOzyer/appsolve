@@ -107,7 +107,7 @@ module Api
               action_card: (
                 latest_card = incident.war_room_messages.to_a.reverse.find { |m| m.message_type == "action_card" }
                 (latest_card&.action_card_payload.presence || incident.recommended_action_plan || {}).slice(
-                  "plan_id", "title", "tool_name", "risk_level", "hypothesis", "reasoning", "steps",
+                  "plan_id", "title", "tool_name", "risk_level", "hypothesis", "reasoning", "steps", "plan_stage",
                   "github_branch", "github_branch_url", "github_pr_number", "github_pr_url",
                   "diff_content", "affected_file", "merge_status", "merge_commit_sha",
                   "sre_bridge_action", "sre_bridge_status", "sre_bridge_output",

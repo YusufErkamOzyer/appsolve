@@ -130,27 +130,22 @@ module AiSre
     }.freeze
 
     CUSTOMER_STATUS_SYSTEM_INSTRUCTION = <<~PROMPT.strip
-      Sen Appsolve ve QuickCart e-ticaret platformunun "Kurumsal Müşteri İletişim Sorumlususun" (AI Public Relations & SRE Communication Specialist).
-      Görevin: Sistemde yaşanan teknik olayları, mobil uygulama müşterilerine ve kamuoyuna duyurulacak şeffaf, güven veren ve TEKNİK JARGONDAN TAMAMEN ARINDIRILMIŞ Türkçe durum duyurularına dönüştürmektir.
+      Sen Appsolve Otonom SRE Platformunun kurumsal bilgilendirme motorusun.
+      Görevin: Sistemde yaşanan olayları, Appsolve'dan hizmet alan müşteri uygulamamızın (QuickCart) sahibine, CEO'suna, CTO'suna ve yönetim ekibine hitap eden, kurumsal, profesyonel, şeffaf ve güven veren Türkçe yönetim bilgilendirmelerine dönüştürmektir.
 
-      KESİN VE ÖNEMLİ KURALLAR:
-      1. ASLA iç teknik jargonu veya kod adlarını KULLANMA. Şunlar kesinlikle YASAKTIR:
-         - "DB lock", "deadlock", "PostgreSQL", "SQL", "pg_stat_activity", "veritabanı kilidi"
-         - "504 Gateway Timeout", "500 Internal Error", "HTTP status code", "timeout"
-         - "stack trace", "exception", "NullPointer", "NaN", "Redis", "cache flush", "bloat"
-         - "feature flag", "promo_v2", "rollback", "pod", "kubernetes", "failover", "p99"
-      2. Kullanıcı deneyimi perspektifinden açıklama yap:
-         - Ödeme için: "Ödeme ve sipariş onaylama adımlarında"
-         - Sepet için: "Sepete ürün ekleme ve indirim kuponu adımlarında"
-         - Giriş için: "Kullanıcı girişi ve hesap doğrulama adımlarında"
-         - Katalog için: "Ürün listeleme ve arama ekranlarında"
-      3. Aşamalar (Phase):
-         - "investigating" (İNCELENİYOR): Sorunun farkında olunduğu ve teknik ekibin yüksek öncelikle incelemeye aldığı belirtilir.
-         - "identified" (SORUN TESPİT EDİLDİ): Aksaklığın nedeninin belirlendiği, düzeltme ve iyileştirme adımlarının yürütüldüğü belirtilir.
-         - "monitoring" (İZLENİYOR): Müdahale sonrası sistemin stabiliteye kavuştuğu ve performansın yakından takip edildiği belirtilir.
-         - "resolved" (ÇÖZÜLDÜ): Servislerin normale döndüğü, kesintisiz hizmet verildiği belirtilir ve teşekkür edilir.
-         - "autonomous_resolved" (OTONOM ÇÖZÜLDÜ): Rutin optimizasyonun sistemlerimizce insan müdahalesi gerekmeksizin başarıyla tamamlandığı belirtilir.
-      4. Ton: Kurumsal, sakin, yapıcı, güven veren e-ticaret dili.
+      HİTAP VE PERSPEKTİF:
+      - Alıcı, uygulamayı kullanan son tüketici değil; QuickCart'ın sahibi, CEO'su veya yönetim ekibindeki temsilcidir.
+      - Doğrudan uygulama yönetimine hitap et ("Uygulamanızın...", "Kullanıcılarınızın işlem akışı...", "Ekibinizle koordineli olarak...", "SLA hedefleriniz doğrultusunda...").
+      - Kurumsal, sakin, çözüm odaklı bir dil kullan.
+
+      KURALLAR:
+      1. Gereksiz ham teknik jargonu (DB lock, SQL sorgusu, stack trace, 504, NaN, Redis bloat vb.) yönetici seviyesine tercüme et (örn. "Ödeme veritabanı kaynak yoğunluğu", "Kupon hesaplama modülü mantık uyarısı", "Katalog önbellek optimizasyonu").
+      2. Aşamalar (Phase):
+         - "investigating" (İNCELENİYOR): Anomali @solver tarafından tespit edilmiş ve uygulamanızın servisinde inceleme başlatılmıştır. Kullanıcı deneyimindeki olası aksamalar takip edilmektedir.
+         - "identified" (SORUN TESPİT EDİLDİ): Aksaklığın kök nedeni belirlenmiş olup @solver kurtarma/iyileştirme planını hazırlamıştır ve mühendislik ekibinizle koordineli olarak devreye alınmaktadır.
+         - "monitoring" (İZLENİYOR): Müdahale başarıyla tamamlanmış olup uygulamanızın servis stabilitesi ve SLA metrikleri yakından izlenmektedir.
+         - "resolved" (ÇÖZÜLDÜ): Aksaklık @solver müdahalesiyle tamamen giderilmiş, tüm servisleriniz %100 kapasiteyle operasyonel duruma getirilmiştir.
+         - "autonomous_resolved" (OTONOM ÇÖZÜLDÜ): Servis optimizasyonu @solver tarafından insan müdahalesine gerek kalmadan otonom olarak tamamlanmış ve servis sağlığı doğrulanmıştır.
     PROMPT
 
     CUSTOMER_STATUS_RESPONSE_SCHEMA = {
@@ -627,7 +622,7 @@ module AiSre
 
       else
         {
-          reply_text: "Talimatınız alındı. @solver olarak emrinizdeyim. Bana hatanın kök nedenini detaylandırmamı söyleyebilir, yeni yönergelerle revize bir implementasyon planı hazırlamamı isteyebilir veya mevcut planı tek tıkla çalıştırabilirsiniz.",
+          reply_text: "Talimatınız alındı. @solver olarak emrinizdeyim. Bana hatanın kök nedenini detaylandırmamı söyleyebilir, yeni yönergelerle revize bir implementasyon planı hazırlamamı isteyebilir veya mevcut planı onaylayabilirsiniz.",
           create_plan: false,
           resolve_incident: false
         }.with_indifferent_access
@@ -715,7 +710,7 @@ module AiSre
         }
       elsif sev == "SEV-2" || slug == "cart"
         {
-          summary: "QuickCart sepet modülünde yeni açılan promo_v2 özellik bayrağı (feature flag) nedeniyle kupon hesaplama adımında NaN (Not a Number) hatası oluşmuştur. Etkilenen kullanıcı oranı %28'e ulaşmış, indirim kuponu kullanan müşteriler sipariş tamamlama adımına geçememiştir. Ajan tarafından hazırlanan eylem kartı nöbetçi mühendisin tek tıkla onayıyla uygulanmış, bayrak geri alınarak kupon önbelleği temizlenmiş ve servis ivedilikle normale döndürülmüştür.",
+          summary: "QuickCart sepet modülünde yeni açılan promo_v2 özellik bayrağı (feature flag) nedeniyle kupon hesaplama adımında NaN (Not a Number) hatası oluşmuştur. Etkilenen kullanıcı oranı %28'e ulaşmış, indirim kuponu kullanan müşteriler sipariş tamamlama adımına geçememiştir. @solver tarafından hazırlanan eylem planı nöbetçi mühendisin onayıyla uygulanmış, bayrak geri alınarak kupon önbelleği temizlenmiş ve servis ivedilikle normale döndürülmüştür.",
           root_cause: "Redis üzerindeki kupon önbellek anahtar formatında yapılan şema değişikliği geriye dönük uyumsuzluk yaratmış; float parse işleminde geçersiz veri NaN üretmiştir. Tip denetiminin eksikliği nedeniyle sepet hesaplama servisi 500 hatası üretmiştir.",
           affected_services: ["Sepet (cart)"],
           action_items: [
@@ -774,73 +769,73 @@ module AiSre
       when "investigating"
         if sev == "SEV-1" || slug == "checkout"
           {
-            headline: "#{service_name} İşlemleri İncelemesi",
-            public_message: "#{service_name} ve sipariş onaylama adımlarında yaşanan geçici aksaklıklar teknik ekibimiz tarafından en yüksek öncelikle incelenmektedir. Yeni siparişleriniz güvende olup sistemlerimiz kontrol altındadır."
+            headline: "#{service_name} İşlemleri Yönetici Bildirimi",
+            public_message: "Sayın QuickCart Yönetimi, uygulamanızın #{service_name} ve sipariş onaylama adımlarında tespit edilen anomali @solver tarafından incelemeye alınmıştır. Kullanıcılarınızın işlem güvenliği kontrol altında olup sistem kurtarma adımları yürütülmektedir."
           }
         elsif sev == "SEV-2" || slug == "cart"
           {
             headline: "#{service_name} Servisi Performans Takibi",
-            public_message: "#{service_name} ve indirim kuponu uygulama adımlarında bazı kullanıcılarımızın karşılaştığı yavaşlamalar teknik ekibimiz tarafından incelenmektedir."
+            public_message: "Sayın QuickCart Yönetimi, uygulamanızın #{service_name} ve indirim kuponu adımlarında bazı kullanıcılarınızın karşılaştığı aksaklık @solver tarafından öncelikli olarak incelenmektedir."
           }
         elsif sev == "SEV-3"
           {
             headline: "#{service_name} Servisi Rutin İnceleme",
-            public_message: "#{service_name} servisinde arka plan optimizasyonu ve rutin telemetri kontrolleri teknik ekiplerimiz tarafından yakından takip edilmektedir. Ana kullanıcı akışları kesintisiz hizmet vermektedir."
+            public_message: "Sayın QuickCart Yönetimi, uygulamanızın #{service_name} servisinde arka plan optimizasyonu ve rutin telemetri kontrolleri @solver tarafından yakından takip edilmektedir. Ana kullanıcı satın alma akışlarınız kesintisiz hizmet vermektedir."
           }
         else
           {
             headline: "#{service_name} Servisi İncelemesi",
-            public_message: "#{service_name} servisinde tespit edilen geçici dalgalanma teknik ekiplerimiz tarafından yakından takip edilmekte ve incelenmektedir."
+            public_message: "Sayın QuickCart Yönetimi, uygulamanızın #{service_name} servisinde tespit edilen hafif dalgalanma @solver tarafından yakından takip edilmekte ve incelenmektedir."
           }
         end
       when "identified"
         if sev == "SEV-1" || slug == "checkout"
           {
             headline: "#{service_name} Kurtarma Müdahalesi Devam Ediyor",
-            public_message: "#{service_name} adımlarındaki aksaklığın kaynağı tespit edilmiş olup teknik kurtarma planımız devreye alınmıştır. Servisin en kısa sürede tam kapasiteye ulaşması hedeflenmektedir."
+            public_message: "Uygulamanızın #{service_name} adımlarındaki aksaklığın kaynağı @solver tarafından tespit edilmiş olup teknik kurtarma planı devreye alınmıştır. Servisin en kısa sürede tam kapasiteye ulaşması hedeflenmektedir."
           }
         elsif sev == "SEV-2" || slug == "cart"
           {
-            headline: "#{service_name} Düzeltme Çalışması Başlatıldı",
-            public_message: "#{service_name} adımlarındaki gecikmenin nedeni belirlenmiş olup mühendislerimizin hazırladığı düzeltme planı sisteme uygulanmaktadır."
+            headline: "#{service_name} Düzeltme Planı Hazırlandı",
+            public_message: "Uygulamanızın #{service_name} adımlarındaki gecikmenin nedeni belirlenmiş olup @solver tarafından hazırlanan düzeltme planı mühendislik ekibinizin onayına sunulmuştur."
           }
         else
           {
             headline: "#{service_name} İyileştirme Adımı Devrede",
-            public_message: "#{service_name} servisindeki performans kaybının kaynağı tespit edilmiş ve gerekli iyileştirme çalışmaları başlatılmıştır."
+            public_message: "Uygulamanızın #{service_name} servisindeki performans kaybının kaynağı tespit edilmiş ve gerekli iyileştirme çalışmaları başlatılmıştır."
           }
         end
       when "monitoring"
         {
           headline: "#{service_name} Servis Stabilitesi İzleniyor",
-          public_message: "Uygulanan teknik müdahale sonrası #{service_name} servisinde stabilite sağlanmış olup sistem metrikleri ve sipariş akışı yakından izlenmektedir."
+          public_message: "Uygulanan teknik müdahale sonrası uygulamanızın #{service_name} servisinde stabilite sağlanmış olup sistem metrikleri ve sipariş akışı @solver tarafından yakından izlenmektedir."
         }
       when "autonomous_resolved"
         {
           headline: "#{service_name} Otonom Olarak Optimize Edildi",
-          public_message: "#{service_name} servisinde tespit edilen hafif performans dalgalanması akıllı sistemlerimiz tarafından insan müdahalesine gerek kalmadan otonom olarak giderilmiş ve tam performans sağlanmıştır."
+          public_message: "Uygulamanızın #{service_name} servisinde tespit edilen hafif performans dalgalanması @solver tarafından insan müdahalesine gerek kalmadan otonom olarak giderilmiş ve tam performans sağlanmıştır."
         }
       when "resolved"
         if sev == "SEV-1" || slug == "checkout"
           {
             headline: "#{service_name} Servisi Tamamen Normale Döndü",
-            public_message: "#{service_name} servisimizdeki tüm aksaklıklar başarıyla giderilmiş, sipariş ve ödeme akışı kesintisiz olarak normale dönmüştür. Gösterdiğiniz sabır ve anlayış için teşekkür ederiz."
+            public_message: "Uygulamanızın #{service_name} servisindeki tüm aksaklıklar @solver müdahalesiyle başarıyla giderilmiş, sipariş ve ödeme akışı kesintisiz olarak normale dönmüştür."
           }
         elsif sev == "SEV-2" || slug == "cart"
           {
             headline: "#{service_name} Servisi Başarıyla Çözüldü",
-            public_message: "#{service_name} ve kupon hesaplama servisimiz tekrar sorunsuz şekilde çalışmaktadır. Tüm kullanıcılarımız sepet ve satın alma işlemlerini güvenle tamamlayabilir."
+            public_message: "Uygulamanızın #{service_name} ve kupon hesaplama servisi tekrar sorunsuz şekilde çalışmaktadır. Kullanıcılarınız sepet ve satın alma işlemlerini güvenle tamamlayabilir."
           }
         else
           {
             headline: "#{service_name} Servisi Operasyonel",
-            public_message: "#{service_name} servisindeki çalışmalar tamamlanmış olup tüm sistemlerimiz tam kapasiteyle ve sorunsuz olarak hizmet vermektedir."
+            public_message: "Uygulamanızın #{service_name} servisindeki çalışmalar tamamlanmış olup tüm sistemleriniz tam kapasiteyle ve sorunsuz olarak hizmet vermektedir."
           }
         end
       else
         {
           headline: "#{service_name} Durum Güncellemesi",
-          public_message: "#{service_name} servisi için güncel durum takibi yapılmakta ve sistem sağlığı doğrulanmaktadır."
+          public_message: "Uygulamanızın #{service_name} servisi için güncel durum takibi yapılmakta ve sistem sağlığı doğrulanmaktadır."
         }
       end.with_indifferent_access
     end

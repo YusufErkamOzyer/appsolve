@@ -24,7 +24,7 @@ module AiSre
       raw_payload = (@incident.raw_payload || {}).dup
 
       # Adım 0: Hata düştü, henüz kategorize edilmedi
-      @incident.update_ai_stage!("jev_categorizing", "Hata inceleniyor — TypeSafe Jev (System One) ile kategorize ediliyor...")
+      @incident.update_ai_stage!("jev_categorizing", "Hata inceleniyor — @solver telemetri sinyalini kategorize ediyor...")
       sleep 1.2 if @staged
 
       # Adım 1A: TypeSafe AI Jev (System One) ile Hata Kategorizasyonu ve SEV Kararı
@@ -35,14 +35,14 @@ module AiSre
 
       @incident.incident_events.create!(
         event_type: "jev_categorization_completed",
-        actor: "typesafe_jev_agent",
-        title: "TypeSafe Jev Kategorizasyonu: #{@incident.severity} (#{jev_decision[:category]})",
-        details: "Model: #{jev_decision[:model]} | Confidence: #{(jev_decision[:confidence].to_f * 100).round(1)}% | Rota: #{jev_decision[:tool_name]}",
+        actor: "@solver",
+        title: "@solver Kategorizasyonu: #{@incident.severity} (#{jev_decision[:category]})",
+        details: "Ajan: @solver | Güven: #{(jev_decision[:confidence].to_f * 100).round(1)}% | Rota: #{jev_decision[:tool_name]}",
         occurred_at: Time.current
       )
 
       # Kullanıcı ekranında Jev kararının ve yeni SEV rozetinin hemen belirmesi için ara kayıt
-      @incident.update_ai_stage!("ai_analyzing", "#{@incident.severity} belirlendi — Kök neden analiz ediliyor ve müdahale planı çıkarılıyor...")
+      @incident.update_ai_stage!("ai_analyzing", "#{@incident.severity} belirlendi — @solver kök neden analizi ve müdahale planı çıkarıyor...")
       sleep 1.2 if @staged
 
       # Adım 1B: Google AI Studio (Gemini) Ajanı ile Kök Neden Hipotezi ve Çözüm Planı Üretimi
@@ -59,8 +59,8 @@ module AiSre
 
       @incident.incident_events.create!(
         event_type: "ai_triage_completed",
-        actor: "gemini_ai_agent",
-        title: "AI SRE Ajanı Triage & Çözüm Planı Tamamlandı (#{@incident.severity})",
+        actor: "@solver",
+        title: "@solver Triage ve Müdahale Planı Hazırlandı (#{@incident.severity})",
         details: "İş Etkisi: #{@incident.reasoning} | Kök Neden: #{@incident.hypothesis}",
         occurred_at: Time.current
       )

@@ -33,8 +33,7 @@ class PostMortemGeneratorTest < ActiveSupport::TestCase
     assert pm.duration_seconds >= 120
     assert_includes pm.mttr_formatted, "dk"
     assert_not_empty pm.action_items
-    assert_includes pm.generated_by, "@solver"
-    assert_includes pm.generated_by, "gemini-3.8-flash"
+    assert_equal "@solver", pm.generated_by
 
     # IncidentEvent created
     event = incident.incident_events.find_by(event_type: "post_mortem_generated")

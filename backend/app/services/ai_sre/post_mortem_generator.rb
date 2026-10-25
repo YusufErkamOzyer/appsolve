@@ -43,7 +43,7 @@ module AiSre
         mttr_formatted: mttr_formatted,
         affected_services: affected,
         action_items: action_items,
-        generated_by: "@solver (#{used_model})"
+        generated_by: "@solver"
       )
       pm.save!
 
@@ -52,14 +52,14 @@ module AiSre
         event_type: "post_mortem_generated",
         actor: "@solver",
         title: "Otomatik Post-Mortem Raporu Yayınlandı (PostMortem 1.1)",
-        details: "Kök neden analizi, MTTR (#{mttr_formatted}) ve #{action_items.size} önleyici aksiyon maddesi içeren resmi rapor #{used_model} ile hazırlandı.",
+        details: "Kök neden analizi, MTTR (#{mttr_formatted}) ve #{action_items.size} önleyici aksiyon maddesi içeren resmi rapor @solver tarafından hazırlandı.",
         occurred_at: Time.current
       )
 
       # War Room içinde duyuru mesajı
       @incident.war_room_messages.create!(
         sender_type: "gemini_ai_agent",
-        sender_name: "@solver (AI SRE Ajanı)",
+        sender_name: "@solver",
         message_type: "text",
         content: "📄 OTOMATİK POST-MORTEM RAPORU YAYINLANDI (PostMortem 1.1)\n\n" \
                  "📋 Özet: #{ai_result[:summary]}\n\n" \

@@ -102,6 +102,13 @@ class RemediationServiceTest < ActiveSupport::TestCase
     AiSre::RemediationService.route_after_triage!(incident)
     assert_equal "degraded", @cart.reload.status
 
+    # Stage 1: Approve proposal plan -> opens PR
+    AiSre::RemediationService.approve_plan!(incident, approved_by: "Ahmet (Senior SRE)")
+    incident.reload
+    assert_equal "investigating", incident.status
+    assert_equal "awaiting_approval", incident.ai_stage
+
+    # Stage 2: Approve PR -> merges PR and resolves incident
     AiSre::RemediationService.approve_plan!(incident, approved_by: "Ahmet (Senior SRE)")
     incident.reload
 
@@ -109,7 +116,7 @@ class RemediationServiceTest < ActiveSupport::TestCase
     assert_not_nil incident.resolved_at
     assert_equal "operational", @cart.reload.status
 
-    action_msg = incident.war_room_messages.find_by(message_type: "action_card")
+    action_msg = incident.war_room_messages.where(message_type: "action_card").last
     assert_equal "executed", action_msg.action_status
     assert_equal "Ahmet (Senior SRE)", action_msg.action_card_payload["approved_by"]
 

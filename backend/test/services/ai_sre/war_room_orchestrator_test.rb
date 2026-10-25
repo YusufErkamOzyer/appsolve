@@ -21,7 +21,7 @@ class WarRoomOrchestratorTest < ActiveSupport::TestCase
     # Initial explanation and PLAN #01
     @incident.war_room_messages.create!(
       sender_type: "gemini_ai_agent",
-      sender_name: "@solver (AI SRE Ajanı)",
+      sender_name: "@solver",
       message_type: "action_card",
       action_status: "pending",
       content: "İmplementasyon Planı (PLAN #01)",
@@ -43,7 +43,7 @@ class WarRoomOrchestratorTest < ActiveSupport::TestCase
     AiSre::WarRoomOrchestrator.call(incident: @incident, engineer_message: msg)
 
     agent_reply = @incident.war_room_messages.where(sender_type: "gemini_ai_agent").last
-    assert_equal "@solver (AI SRE Ajanı)", agent_reply.sender_name
+    assert_equal "@solver", agent_reply.sender_name
     assert_equal "text", agent_reply.message_type
     assert_includes agent_reply.content, "payment_records"
   end

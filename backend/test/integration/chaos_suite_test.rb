@@ -87,9 +87,22 @@ class ChaosSuiteTest < ActionDispatch::IntegrationTest
       assert_equal "approval_required", incident["autonomy_mode"]
       assert_equal "investigating", incident["status"]
 
-      # Verify GitHub Branch & Pull Request Generation
-      action_card = incident["action_card"]
+      # Verify Stage 1 Proposal ActionCard
+      proposal_card = incident["action_card"]
+      assert_not_nil proposal_card
+      assert_equal "plan_proposal", proposal_card["plan_stage"]
+      assert_equal "src/services/cart.service.ts", proposal_card["affected_file"]
+
+      # 2. Engineer approves Stage 1 plan -> Generates code patch & opens PR
+      post "/api/v1/incidents/#{incident_id}/approve_plan", params: {
+        approved_by: "Ahmet (Senior SRE Lead)",
+        plan_id: proposal_card["plan_id"]
+      }, as: :json
+
+      assert_response :success
+      action_card = JSON.parse(response.body)["incident"]["action_card"]
       assert_not_nil action_card
+      assert_equal "pr_review", action_card["plan_stage"]
       assert_match(/^appsolve\/fix-/, action_card["github_branch"])
       assert_kind_of Integer, action_card["github_pr_number"]
       assert_includes action_card["github_pr_url"], "/pull/#{action_card['github_pr_number']}"
@@ -98,7 +111,7 @@ class ChaosSuiteTest < ActionDispatch::IntegrationTest
       assert_includes action_card["diff_content"], "--- a/src/services/cart.service.ts"
       assert_includes action_card["diff_content"], "+++ b/src/services/cart.service.ts"
 
-      # 2. Engineer approves plan -> Merges PR & dispatches sync_source via Bridge
+      # 3. Engineer approves Stage 2 PR -> Merges PR & dispatches sync_source via Bridge
       post "/api/v1/incidents/#{incident_id}/approve_plan", params: {
         approved_by: "Ahmet (Senior SRE Lead)",
         plan_id: action_card["plan_id"]
@@ -108,7 +121,7 @@ class ChaosSuiteTest < ActionDispatch::IntegrationTest
       approval_json = JSON.parse(response.body)
       assert_equal "executed", approval_json["status"]
 
-      # 3. Verify Incident resolved, PR merged, and Bridge sync executed
+      # 4. Verify Incident resolved, PR merged, and Bridge sync executed
       resolved_incident = approval_json["incident"]
       assert_equal "resolved", resolved_incident["status"]
       assert_not_nil resolved_incident["resolved_at"]

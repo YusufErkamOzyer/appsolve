@@ -17,6 +17,10 @@ module AiSre
       new(incident, git_provider: git_provider, gemini_client: gemini_client).call
     end
 
+    def self.determine_source_file(incident)
+      new(incident).send(:extract_source_file)
+    end
+
     def initialize(incident, git_provider: nil, gemini_client: nil)
       @incident = incident
       @raw_payload = incident.raw_payload || {}

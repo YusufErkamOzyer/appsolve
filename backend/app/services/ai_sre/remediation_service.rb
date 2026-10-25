@@ -30,7 +30,7 @@ module AiSre
         sleep 1.2 if staged
         execute_autonomous_resolution!(staged: staged)
       elsif @incident.requires_human_approval?
-        @incident.update_ai_stage!("ai_preparing_patch", "SEV-2 Kod onarımı çalışıyor — Kaynak dosya inceleniyor, yama (diff) ve GitHub PR hazırlanıyor...")
+        @incident.update_ai_stage!("ai_analyzing", "SEV-2 Kriz analizi — @solver implementasyon planı hazırlıyor...")
         sleep 1.2 if staged
         prepare_human_approval_card!
         @incident.update_ai_stage!("awaiting_approval", nil)
@@ -49,8 +49,6 @@ module AiSre
         raise AlreadyResolvedError, "Olay (#{@incident.incident_code}) zaten çözülmüş durumda."
       end
 
-      @incident.update_ai_stage!("ai_executing_plan", "Müdahale planı icra ediliyor — Değişiklikler uygulanıyor ve servis doğrulanıyor...")
-
       # Guardrail Engine doğrulaması (insan onayı kontrolü)
       AiSre::GuardrailEngine.authorize_approved_plan!(@incident, approved_by: approved_by)
 
@@ -59,7 +57,8 @@ module AiSre
         if message_id.present?
           @incident.war_room_messages.find_by(id: message_id)
         elsif plan_id.present?
-          @incident.war_room_messages.where(message_type: "action_card").to_a.find { |m| m.action_card_payload&.dig("plan_id") == plan_id }
+          @incident.war_room_messages.where(message_type: "action_card", action_status: "pending").to_a.find { |m| m.action_card_payload&.dig("plan_id") == plan_id } ||
+            @incident.war_room_messages.where(message_type: "action_card").to_a.reverse.find { |m| m.action_card_payload&.dig("plan_id") == plan_id }
         else
           @incident.war_room_messages.where(message_type: "action_card", action_status: "pending").last ||
             @incident.war_room_messages.where(message_type: "action_card").last
@@ -69,11 +68,104 @@ module AiSre
       active_plan_id = plan["plan_id"] || "PLAN #01"
       title = plan["title"] || "Sistem Müdahalesi"
 
+      # --- AŞAMA 1: SEV-2 İmplementasyon Planı Onayı (PR Açılışı) ---
+      if plan["plan_stage"] == "plan_proposal" || (plan["tool_name"] == "prepare_code_patch" && plan["github_pr_number"].blank?)
+        @incident.update_ai_stage!("ai_preparing_patch", "@solver onaylanan plan doğrultusunda kod yamasını ve GitHub PR'ını hazırlıyor...")
+        sleep 1.2 if staged
+
+        repair = AiSre::CodeRepairService.call(@incident, git_provider: @git_provider)
+        @git_provider.create_branch(repair.branch_name)
+        @git_provider.commit_patch(
+          branch: repair.branch_name,
+          path: repair.source_file,
+          content: repair.patched_content,
+          message: repair.pr_title
+        )
+        pr = @git_provider.create_pull_request(
+          title: repair.pr_title,
+          body: repair.pr_body,
+          head_branch: repair.branch_name,
+          base_branch: "main"
+        )
+
+        @incident.incident_events.create!(
+          event_type: "plan_approved",
+          actor: "on_call_engineer",
+          title: "İmplementasyon Planı Onaylandı (#{active_plan_id})",
+          details: "#{approved_by} tarafından '#{title}' planı onaylandı. GitHub PR hazırlığı tamamlandı.",
+          occurred_at: Time.current
+        )
+
+        # 1. Aşama öneri kartını onaylandı olarak işaretle
+        if action_card_msg
+          p_proposal = (action_card_msg.action_card_payload || {}).dup
+          p_proposal["approved_by"] = approved_by
+          p_proposal["approved_at"] = Time.current.iso8601
+          action_card_msg.update!(
+            action_status: "plan_approved",
+            action_card_payload: p_proposal,
+            content: "#{title} implementasyon planı #{approved_by} tarafından onaylandı. Düzeltme PR ##{pr[:pr_number]} açıldı."
+          )
+        end
+
+        # 2. Aşama: Kod İnceleme ve PR Birleştirme Kartı (pr_review) oluştur
+        pr_payload = {
+          "plan_id" => "PLAN #02",
+          "title" => "GitHub PR ##{pr[:pr_number]} Kod İnceleme ve Birleştirme",
+          "tool_name" => "merge_pr_and_sync_source",
+          "risk_level" => "medium",
+          "hypothesis" => @incident.hypothesis,
+          "reasoning" => @incident.reasoning,
+          "plan_stage" => "pr_review",
+          "steps" => [
+            "GitHub üzerinde '#{repair.branch_name}' dalı açıldı",
+            "Düzeltme PR ##{pr[:pr_number]} olarak açıldı",
+            "Unified diff ve düzeltilen dosya (#{repair.source_file}) incelendi",
+            "Mühendis onayı sonrası PR merge edilecek ve QuickCart SRE bridge ile sync_source çalıştırılacak"
+          ],
+          "estimated_duration" => "~5 dk",
+          "impact_scope" => "#{@service.name} Servisi (#{@service.slug})",
+          "github_branch" => repair.branch_name,
+          "github_branch_url" => pr[:branch_url],
+          "github_pr_number" => pr[:pr_number],
+          "github_pr_url" => pr[:pr_url],
+          "diff_content" => repair.unified_diff,
+          "affected_file" => repair.source_file,
+          "merge_status" => "pending",
+          "patched_content" => repair.patched_content
+        }
+
+        @incident.update!(recommended_action_plan: pr_payload)
+
+        @incident.war_room_messages.create!(
+          sender_type: "gemini_ai_agent",
+          sender_name: "@solver",
+          message_type: "action_card",
+          action_status: "pending",
+          content: "Onayınız doğrultusunda GitHub PR ##{pr[:pr_number]} açıldı ve unified diff yansıması hazırlandı. Kod incelemenizi yapıp PR'ı birleştirebilir veya revize yönerge verebilirsiniz.",
+          action_card_payload: pr_payload
+        )
+
+        @incident.incident_events.create!(
+          event_type: "pr_created",
+          actor: "@solver",
+          title: "GitHub Düzeltme PR'ı Açıldı (PR ##{pr[:pr_number]})",
+          details: "#{approved_by} onayıyla '#{repair.branch_name}' dalı üzerinde PR ##{pr[:pr_number]} açıldı ve incelemeye sunuldu.",
+          occurred_at: Time.current
+        )
+
+        @incident.update_ai_stage!("awaiting_approval", nil)
+        return @incident.reload
+      end
+
+      # --- AŞAMA 2 VEYA DOĞRUDAN İCRA (SEV-1 / SEV-3 / PR Merge) ---
+      @incident.update_ai_stage!("ai_executing_plan", "Müdahale planı icra ediliyor — Değişiklikler uygulanıyor ve servis doğrulanıyor...")
+
       @incident.incident_events.create!(
         event_type: "plan_approved",
         actor: "on_call_engineer",
         title: "İmplementasyon Planı Onaylandı (#{active_plan_id})",
-        details: "#{approved_by} tarafından '#{title}' planı tek tıkla onaylandı ve icra başlatıldı.",
+        details: "#{approved_by} tarafından '#{title}' planı onaylandı ve icra başlatıldı.",
         occurred_at: Time.current
       )
 
@@ -133,7 +225,7 @@ module AiSre
       else
         @incident.war_room_messages.create!(
           sender_type: "gemini_ai_agent",
-          sender_name: "@solver (AI SRE Ajanı)",
+          sender_name: "@solver",
           message_type: "action_card",
           action_status: "executed",
           content: "#{title} implementasyon planı #{approved_by} onayıyla başarıyla uygulandı.",
@@ -144,14 +236,14 @@ module AiSre
       # Ajanın teknik doğrulama mesajı
       @incident.war_room_messages.create!(
         sender_type: "gemini_ai_agent",
-        sender_name: "@solver (AI SRE Ajanı)",
+        sender_name: "@solver",
         message_type: "system_diagnostic",
         content: "İmplementasyon tamamlandı: #{result.verification_summary}\n\nTeknik Çıktı:\n#{result.terminal_output}"
       )
 
       @incident.incident_events.create!(
         event_type: "remediation_executed",
-        actor: "gemini_ai_agent",
+        actor: "@solver",
         title: "Sistem Düzeltmesi Başarıyla Uygulandı (#{result.tool_name})",
         details: result.verification_summary,
         occurred_at: Time.current
@@ -159,7 +251,7 @@ module AiSre
 
       @incident.incident_events.create!(
         event_type: "incident_resolved",
-        actor: "gemini_ai_agent",
+        actor: "@solver",
         title: "Servis Normale Döndü ve Olay Kapatıldı",
         details: "#{@service.name} servisi operasyonel duruma getirildi. MTTR hedefine uygun olarak olay kapatıldı.",
         occurred_at: Time.current
@@ -173,7 +265,7 @@ module AiSre
       AiSre::CustomerCommunicationService.publish_resolved!(@incident)
 
       # Otomatik Post-Mortem Raporu Üretimi (PostMortem 1.1)
-      @incident.update_ai_stage!("writing_post_mortem", "Hata çözüldü — Gemini Flash ile Post-Mortem analiz raporu yazılıyor...")
+      @incident.update_ai_stage!("writing_post_mortem", "Hata çözüldü — @solver Post-Mortem analiz raporunu hazırlıyor...")
       sleep 1.2 if staged
 
       AiSre::PostMortemGenerator.generate!(@incident)
@@ -288,85 +380,54 @@ module AiSre
       @incident.update_ai_stage!("completed", nil)
     end
 
-    # Yol B (SEV-2): Nöbetçi Mühendis İçin İnteraktif Eylem Kartı Hazırlığı (GitHub PR & Diff)
+    # SEV-2 Aşama 1: Nöbetçi Mühendis İçin İmplementasyon Planı Kartı Hazırlığı (Henüz PR açılmaz)
     def prepare_human_approval_card!
       plan = (@incident.recommended_action_plan || {}).dup.with_indifferent_access
-
-      # R3: Parse stack trace, locate source file, generate code repair & diff, create Git branch + PR
-      repair = AiSre::CodeRepairService.call(@incident, git_provider: @git_provider)
-
-      # Create branch on GitProvider
-      @git_provider.create_branch(repair.branch_name)
-
-      # Commit patch on GitProvider
-      @git_provider.commit_patch(
-        branch: repair.branch_name,
-        path: repair.source_file,
-        content: repair.patched_content,
-        message: repair.pr_title
-      )
-
-      # Open Pull Request
-      pr = @git_provider.create_pull_request(
-        title: repair.pr_title,
-        body: repair.pr_body,
-        head_branch: repair.branch_name,
-        base_branch: "main"
-      )
+      affected_file = AiSre::CodeRepairService.determine_source_file(@incident)
 
       payload = {
-        "plan_id" => plan["plan_id"] || "PLAN #02",
-        "title" => plan["title"] || "GitHub PR ve SRE Köprüsü ile Kod Düzeltmesi",
-        "tool_name" => plan["tool_name"] || "merge_pr_and_sync_source",
-        "risk_level" => plan["risk_level"] || "medium",
+        "plan_id" => plan["plan_id"].presence || "PLAN #02",
+        "title" => plan["title"].presence || "Kaynak Kod İyileştirme ve PR Hazırlık Planı",
+        "tool_name" => plan["tool_name"].presence || "prepare_code_patch",
+        "risk_level" => plan["risk_level"].presence || "medium",
         "hypothesis" => @incident.hypothesis,
         "reasoning" => @incident.reasoning,
-        "steps" => [
-          "GitHub üzerinde '#{repair.branch_name}' dalı açıldı",
-          "Düzeltme PR ##{pr[:pr_number]} olarak açıldı",
-          "Unified diff ve düzeltilen dosya (#{repair.source_file}) incelendi",
-          "Mühendis onayı sonrası PR merge edilecek ve QuickCart SRE bridge ile sync_source çalıştırılacak"
+        "plan_stage" => "plan_proposal",
+        "affected_file" => affected_file,
+        "steps" => Array(plan["steps"]).presence || [
+          "Kök neden hipotezi doğrultusunda kaynak dosya (#{affected_file}) incelemesi",
+          "Hatalı mantık için korumalı kod yaması ve unified diff üretimi",
+          "GitHub üzerinde düzeltme dalı ve Pull Request açılışı",
+          "Mühendis kod incelemesi ve birleştirme (merge) onayı"
         ],
-        "estimated_duration" => "10-15 dk",
-        "impact_scope" => "#{@service.name} Servisi (#{@service.slug})",
-        # R3 & R4 Enhanced GitHub fields
-        "github_branch" => repair.branch_name,
-        "github_branch_url" => pr[:branch_url],
-        "github_pr_number" => pr[:pr_number],
-        "github_pr_url" => pr[:pr_url],
-        "diff_content" => repair.unified_diff,
-        "affected_file" => repair.source_file,
-        "merge_status" => "pending",
-        "patched_content" => repair.patched_content
+        "estimated_duration" => "~5-10 dk",
+        "impact_scope" => "#{@service.name} Servisi (#{@service.slug})"
       }
 
-      # Update incident recommended_action_plan with the enriched payload
       @incident.update!(recommended_action_plan: payload)
 
       @incident.war_room_messages.create!(
         sender_type: "gemini_ai_agent",
-        sender_name: "Gemini AI SRE Ajanı",
+        sender_name: "@solver",
         message_type: "action_card",
         action_status: "pending",
-        content: "Kök neden hipotezi doğrultusunda GitHub PR ##{pr[:pr_number]} açtım ve tek tıkla uygulanabilir eylem kartı hazırladım. Onayınız bekleniyor.",
+        content: "Kök neden hipotezi doğrultusunda kaynak kod iyileştirme planını hazırladım. Planı onaylamanız durumunda kod yaması uygulanacak ve GitHub PR incelemenize sunulacaktır.",
         action_card_payload: payload
       )
 
       @incident.incident_events.create!(
         event_type: "action_card_posted",
-        actor: "gemini_ai_agent",
-        title: "War Room İçine Eylem Kartı Bırakıldı (PR ##{pr[:pr_number]})",
-        details: "Nöbetçi mühendisin tek tıkla onaylayabileceği GitHub PR ve düzeltme planı War Room'da hazırlandı.",
+        actor: "@solver",
+        title: "War Room İçine İmplementasyon Planı Bırakıldı (#{payload['plan_id']})",
+        details: "Nöbetçi mühendisin onaylayabileceği veya sohbet üzerinden yönlendirebileceği ilk müdahale planı War Room'da hazırlandı.",
         occurred_at: Time.current
       )
 
-      # Müşteri Durum Sayfası ve Mobil Bildirimi (Sorun Tespit Edildi / Müdahale Hazırlandı)
       AiSre::CustomerCommunicationService.publish_identified!(@incident)
     end
 
-    # Yol C (SEV-1): AI Hipotez, Hata Açıklaması ve Tek Tıkla İnteraktif İmplementasyon Planı
+    # SEV-1: AI Hipotez, Hata Açıklaması ve İnteraktif İmplementasyon Planı
     def prepare_manual_war_room_state!
-      # R3: Inspect DB locks via SreBridgeClient
       bridge_res = @bridge_client.inspect_db_locks(incident_id: @incident.id)
 
       plan = (@incident.recommended_action_plan || {}).dup.with_indifferent_access
@@ -392,20 +453,20 @@ module AiSre
       # 1. @solver Hata ve Hipotez Açıklaması
       @incident.war_room_messages.create!(
         sender_type: "gemini_ai_agent",
-        sender_name: "@solver (AI SRE Ajanı)",
+        sender_name: "@solver",
         message_type: "text",
         content: "🚨 KRİTİK SEV-1 KRİZİ TESPİT EDİLDİ\n\n" \
                  "🔍 Hata Açıklaması: #{@incident.reasoning}\n\n" \
                  "💡 Kök Neden Hipotezi: #{@incident.hypothesis}\n\n" \
                  "🔍 QuickCart SRE Köprüsü Tanı Özeti:\n#{bridge_res[:output]}\n\n" \
                  "Bu sorunu gidermek üzere aşağıda 'PLAN #01' implementasyon planını hazırladım. " \
-                 "Tek tıkla çalıştırabilir veya sohbet üzerinden bana (@solver) yeni yönergeler verebilirsiniz."
+                 "Planı onaylayabilir veya sohbet üzerinden bana (@solver) yeni yönergeler verebilirsiniz."
       )
 
-      # 2. Tek tıkla çalıştırılabilir ilk implementasyon planı (pending)
+      # 2. İnteraktif ilk implementasyon planı (pending)
       @incident.war_room_messages.create!(
         sender_type: "gemini_ai_agent",
-        sender_name: "@solver (AI SRE Ajanı)",
+        sender_name: "@solver",
         message_type: "action_card",
         action_status: "pending",
         content: "İmplementasyon Planı (#{payload['plan_id']}): #{payload['title']}. Onayınız bekleniyor.",
@@ -414,13 +475,12 @@ module AiSre
 
       @incident.incident_events.create!(
         event_type: "war_room_opened",
-        actor: "gemini_ai_agent",
+        actor: "@solver",
         title: "War Room Açıldı: @solver İmplementasyon Planı Hazırladı (SEV-1)",
         details: "Nöbetçi Mühendis ve Takım Lideri için canlı kriz odası açıldı. @solver ilk müdahale planını sundu.",
         occurred_at: Time.current
       )
 
-      # Müşteri Durum Sayfası ve Mobil Bildirimi (Sorun Tespit Edildi / Kurtarma Planı Hazırlandı)
       AiSre::CustomerCommunicationService.publish_identified!(@incident)
     end
 

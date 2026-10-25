@@ -348,7 +348,7 @@ export default function StatusPage() {
           variant="ink"
           headerRight={
             <span className="text-[10px]">
-              AI KURUMSAL İLETİŞİM MOTORU • TÜM SEVİYE ŞEFFAFLIK
+              UYGULAMA SAHİBİ &amp; YÖNETİM EKİBİ BİLGİLENDİRME PANELİ
             </span>
           }
         >
@@ -389,7 +389,7 @@ export default function StatusPage() {
             </div>
 
             <div className="text-[10px] text-[#80426E]">
-              Kurumsal Şeffaflık İlkesi: SEV-1, SEV-2 ve SEV-3 yayınlanır
+              Kurumsal Şeffaflık İlkesi: Uygulama sahibine ve yönetici ekibe anlık bildirim
             </div>
           </div>
 
@@ -401,8 +401,8 @@ export default function StatusPage() {
                   [BİLDİRİLEN BİR KESİNTİ BULUNMUYOR]
                 </div>
                 <p className="text-[12px] text-[#80426E] max-w-md mx-auto leading-relaxed font-sans">
-                  Son 24 saat içinde müşterilerimizi etkileyen majör bir servis kesintisi yaşanmamıştır.
-                  Tüm altyapı telemetrisi gerçek zamanlı doğrulanmakta olup herhangi bir servis güncellemesi burada anında yayınlanacaktır.
+                  Son 24 saat içinde uygulamanızı etkileyen bir servis kesintisi yaşanmamıştır.
+                  Tüm altyapı telemetrisi @solver tarafından gerçek zamanlı doğrulanmakta olup herhangi bir servis güncellemesi burada anında yayınlanacaktır.
                 </p>
               </div>
             ) : (
@@ -458,7 +458,7 @@ export default function StatusPage() {
 
                       {/* Verification Stamp */}
                       <div className="flex items-center justify-between pt-1 border-t border-[#522D60]/10 font-mono text-[9px] text-[#80426E]">
-                        <span>✓ AI SRE Kurumsal İletişim Motoru tarafından doğrulandı</span>
+                        <span>✓ @solver Kurumsal Bilgilendirme Motoru tarafından doğrulandı</span>
                         <span className="text-[#1E8E5A] font-bold">CANLI YAYINDA</span>
                       </div>
                     </div>

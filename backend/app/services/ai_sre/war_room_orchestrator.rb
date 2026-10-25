@@ -53,7 +53,7 @@ module AiSre
 
       @incident.war_room_messages.create!(
         sender_type: "gemini_ai_agent",
-        sender_name: "@solver (AI SRE Ajanı)",
+        sender_name: "@solver",
         message_type: "system_diagnostic",
         content: "#{res[:reply_text]}\n\nDoğrulama Raporu:\n#{diag_result.terminal_output}"
       )
@@ -73,7 +73,7 @@ module AiSre
       AiSre::CustomerCommunicationService.publish_resolved!(@incident)
 
       # Otomatik Post-Mortem Raporu Üretimi (PostMortem 1.1)
-      @incident.update_ai_stage!("writing_post_mortem", "Hata çözüldü — Gemini Flash ile Post-Mortem analiz raporu yazılıyor...")
+      @incident.update_ai_stage!("writing_post_mortem", "Hata çözüldü — @solver Post-Mortem analiz raporunu hazırlıyor...")
       AiSre::PostMortemGenerator.generate!(@incident)
       @incident.update_ai_stage!("completed", nil)
     end
@@ -82,7 +82,7 @@ module AiSre
       # 1. @solver açıklama mesajı
       @incident.war_room_messages.create!(
         sender_type: "gemini_ai_agent",
-        sender_name: "@solver (AI SRE Ajanı)",
+        sender_name: "@solver",
         message_type: "text",
         content: res[:reply_text]
       )
@@ -94,7 +94,7 @@ module AiSre
       # 2. Yeni interaktif implementasyon planı kartı (pending)
       @incident.war_room_messages.create!(
         sender_type: "gemini_ai_agent",
-        sender_name: "@solver (AI SRE Ajanı)",
+        sender_name: "@solver",
         message_type: "action_card",
         action_status: "pending",
         content: "İmplementasyon Planı (#{plan_id}): #{title}. Onayınız bekleniyor.",
@@ -134,7 +134,7 @@ module AiSre
 
       @incident.war_room_messages.create!(
         sender_type: "gemini_ai_agent",
-        sender_name: "@solver (AI SRE Ajanı)",
+        sender_name: "@solver",
         message_type: "system_diagnostic",
         content: "#{res[:reply_text]}\n\nTeknik Tanı Dökümü:\n#{diag_result.terminal_output}"
       )
@@ -151,7 +151,7 @@ module AiSre
     def handle_conversational_reply(res)
       @incident.war_room_messages.create!(
         sender_type: "gemini_ai_agent",
-        sender_name: "@solver (AI SRE Ajanı)",
+        sender_name: "@solver",
         message_type: "text",
         content: res[:reply_text]
       )

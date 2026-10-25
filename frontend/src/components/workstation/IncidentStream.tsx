@@ -137,12 +137,6 @@ export function IncidentStream({
     }
   };
 
-  const handleRequestRevision = (planId: string) => {
-    const template = `@solver ${planId} planını şu şekilde revize et: `;
-    setCommandInput(template);
-    inputRef.current?.focus();
-  };
-
   const warRoomMessages = incident.messages || [];
 
   return (
@@ -163,7 +157,7 @@ export function IncidentStream({
           ) : isJevCategorizing ? (
             <span className="inline-flex items-center gap-1 font-bold text-[#522D60] px-2 py-0.5 bg-[#FFD38B] border border-[#522D60] animate-pulse">
               <span className="w-2 h-2 rounded-full bg-[#522D60]" />
-              ⏳ JEV İNCELİYOR
+              ⏳ @SOLVER İNCELİYOR
             </span>
           ) : (
             <span
@@ -342,7 +336,7 @@ export function IncidentStream({
             </div>
           </div>
 
-          {/* Card 1A: RETRO ORB (Hata İnceleniyor & Jev Kategorizasyonu Devrede) */}
+          {/* Card 1A: RETRO ORB (Hata İnceleniyor & @solver Ön Analizi) */}
           {isJevCategorizing && (
             <div className="relative space-y-1.5">
               <div className="flex items-center gap-2 font-mono text-[10px] -ml-6 sm:-ml-8">
@@ -351,17 +345,17 @@ export function IncidentStream({
                 </span>
                 <span className="font-bold text-[#80426E] tabular-nums">{timeStr}</span>
                 <span className="px-1.5 py-0.2 bg-[#FAF6F2] border border-[#522D60] text-[#522D60] font-bold tracking-wider">
-                  TYPESAFE JEV ANALİZİ
+                  @SOLVER ÖN ANALİZ
                 </span>
               </div>
               <RetroThinkingOrb
-                stageLabel="TYPESAFE JEV // SYSTEM ONE"
-                statusText={aiStatusText || "Hata inceleniyor — TypeSafe Jev (System One) ile kategorize ediliyor..."}
+                stageLabel="@SOLVER ÖN ANALİZ"
+                statusText={aiStatusText || "Hata inceleniyor — @solver telemetri sinyalini kategorize ediyor..."}
               />
             </div>
           )}
 
-          {/* Card 1B: TYPESAFE JEV KATEGORİZASYON KARARI */}
+          {/* Card 1B: @SOLVER KATEGORİZASYON KARARI */}
           {hasJevDecision && (
             <div className="relative space-y-1.5">
               <div className="flex items-center gap-2 font-mono text-[10px] -ml-6 sm:-ml-8">
@@ -370,7 +364,7 @@ export function IncidentStream({
                 </span>
                 <span className="font-bold text-[#80426E] tabular-nums">{timeStr}</span>
                 <span className="px-1.5 py-0.2 bg-[#FAF6F2] border border-[#80426E] text-[#80426E] font-bold tracking-wider">
-                  TYPESAFE JEV (SYSTEM ONE) KARARI
+                  @SOLVER KATEGORİZASYON KARARI
                 </span>
               </div>
 
@@ -397,11 +391,11 @@ export function IncidentStream({
 
                 <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 font-mono text-[10px] text-[#522D60] bg-[#FAF6F2] p-2 border border-[#522D60]/20">
                   <div>
-                    <span className="text-[8px] text-[#80426E] block uppercase">Model:</span>
-                    <strong className="text-[#522D60] truncate block">{String(jevDecision?.model || "jev-latest")}</strong>
+                    <span className="text-[8px] text-[#80426E] block uppercase">Ajan:</span>
+                    <strong className="text-[#522D60] truncate block">@solver</strong>
                   </div>
                   <div>
-                    <span className="text-[8px] text-[#80426E] block uppercase">Güven (Confidence):</span>
+                    <span className="text-[8px] text-[#80426E] block uppercase">Güven Skoru:</span>
                     <strong className="text-[#1E8E5A]">
                       {jevDecision?.confidence ? `%${(Number(jevDecision.confidence) * 100).toFixed(1)}` : "%98.0"}
                     </strong>
@@ -528,9 +522,9 @@ export function IncidentStream({
               <RetroThinkingOrb
                 stageLabel={
                   aiStage === "ai_autonomous_solving"
-                    ? "@SOLVER OTONOM MÜDAHALE MOTORU"
+                    ? "@SOLVER OTONOM MÜDAHALE"
                     : aiStage === "ai_preparing_patch"
-                    ? "@SOLVER KOD ONARIM MOTORU (DIFF & PR)"
+                    ? "@SOLVER KOD ONARIM MOTORU"
                     : aiStage === "ai_inspecting_locks"
                     ? "@SOLVER VERİTABANI KİLİT TARAMASI"
                     : aiStage === "ai_executing_plan"
@@ -556,7 +550,6 @@ export function IncidentStream({
                     incident={incident}
                     message={msg}
                     onActionComplete={onIncidentUpdated}
-                    onRequestRevision={handleRequestRevision}
                   />
                 );
               }
@@ -640,7 +633,6 @@ export function IncidentStream({
             <ActionCard
               incident={incident}
               onActionComplete={onIncidentUpdated}
-              onRequestRevision={handleRequestRevision}
             />
           )}
 
@@ -674,7 +666,7 @@ export function IncidentStream({
                   <div className="bg-[#FFFFFF] p-2 border border-[#1E8E5A]/30">
                     <span className="text-[9px] text-[#80426E] uppercase block">Çözüm Modeli:</span>
                     <strong className="text-[11px] text-[#1E8E5A]">
-                      {isSev3 ? "Yol A (Tam Otonom)" : isSev2 ? "Yol B (Tek Tık Onay)" : "Yol C (@solver War Room)"}
+                      {isSev3 ? "Otonom Müdahale" : isSev2 ? "Eylem Planı ve PR Onayı" : "War Room Ortak Müdahale"}
                     </strong>
                   </div>
                   <div className="bg-[#FFFFFF] p-2 border border-[#1E8E5A]/30">
@@ -694,7 +686,7 @@ export function IncidentStream({
             </div>
           )}
 
-          {/* Post-Mortem Writing In Progress Orb (Gemini Flash 3.8 / 3.6) */}
+          {/* Post-Mortem Writing In Progress Orb (@solver) */}
           {isResolved && (!incident.post_mortem || aiStage === "writing_post_mortem") && (
             <div className="relative space-y-1.5">
               <div className="flex items-center gap-2 font-mono text-[10px] -ml-6 sm:-ml-8">
@@ -705,14 +697,14 @@ export function IncidentStream({
                   {incident.resolved_at ? new Date(incident.resolved_at).toLocaleTimeString() : timeStr}
                 </span>
                 <span className="px-1.5 py-0.2 bg-[#FAF6F2] border border-[#522D60] text-[#522D60] font-bold tracking-wider">
-                  GEMINI FLASH 3.8 / 3.6 RAPORLAMA
+                  @SOLVER RAPORLAMA
                 </span>
               </div>
               <RetroThinkingOrb
-                stageLabel="GEMINI FLASH 3.8 / 3.6 RAPORLAMA"
+                stageLabel="@SOLVER RAPORLAMA MOTORU"
                 statusText={
                   aiStatusText ||
-                  "Hata çözüldü — Gemini Flash (3.8 / 3.6 kota duyarlı) ile Post-Mortem raporu yazılıyor..."
+                  "Hata çözüldü — @solver Post-Mortem analiz raporunu hazırlıyor..."
                 }
               />
             </div>

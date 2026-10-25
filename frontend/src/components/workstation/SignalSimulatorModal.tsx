@@ -94,7 +94,7 @@ export function SignalSimulatorModal({
         },
       });
 
-      setFeedback("Sinyal iletildi! Jev yapay zeka analizi başlatıldı.");
+      setFeedback("Sinyal iletildi! @solver analizi başlatıldı.");
       await onSignalSent();
       onClose();
       setFeedback(null);

@@ -34,9 +34,23 @@ class RemediationFlowIntegrationTest < ActionDispatch::IntegrationTest
     assert_equal "SEV-2", json["incident"]["severity"]
     assert_equal "approval_required", json["incident"]["autonomy_mode"]
 
-    # Verify ActionCard metadata in response
-    action_card = json["incident"]["action_card"]
+    # Verify Stage 1 ActionCard metadata (plan_proposal)
+    proposal_card = json["incident"]["action_card"]
+    assert_not_nil proposal_card
+    assert_equal "plan_proposal", proposal_card["plan_stage"]
+    assert_equal "src/services/cart.service.ts", proposal_card["affected_file"]
+
+    # 2. Stage 1: Engineer approves plan proposal: POST /api/v1/incidents/:id/approve_plan -> PR created
+    post "/api/v1/incidents/#{incident_id}/approve_plan", params: {
+      approved_by: "Ahmet (Senior SRE)",
+      plan_id: proposal_card["plan_id"]
+    }, as: :json
+
+    assert_response :success
+    stage1_json = JSON.parse(response.body)
+    action_card = stage1_json["incident"]["action_card"]
     assert_not_nil action_card
+    assert_equal "pr_review", action_card["plan_stage"]
     assert_not_nil action_card["github_branch"]
     assert_not_nil action_card["github_pr_number"]
     assert_not_nil action_card["github_pr_url"]
@@ -44,7 +58,7 @@ class RemediationFlowIntegrationTest < ActionDispatch::IntegrationTest
     assert_includes action_card["diff_content"], "--- a/src/services/cart.service.ts"
     assert_includes action_card["diff_content"], "+++ b/src/services/cart.service.ts"
 
-    # 2. Query GET /api/v1/incidents/:id and verify enhanced ActionCard fields are present
+    # 3. Query GET /api/v1/incidents/:id and verify enhanced ActionCard fields are present
     get "/api/v1/incidents/#{incident_id}", as: :json
     assert_response :success
     detail_json = JSON.parse(response.body)
@@ -56,7 +70,7 @@ class RemediationFlowIntegrationTest < ActionDispatch::IntegrationTest
     assert_equal "src/services/cart.service.ts", detail_card["affected_file"]
     assert_equal "pending", detail_card["merge_status"]
 
-    # 3. Engineer approves plan: POST /api/v1/incidents/:id/approve_plan
+    # 4. Stage 2: Engineer approves PR merge & deployment
     post "/api/v1/incidents/#{incident_id}/approve_plan", params: {
       approved_by: "Ahmet (Senior SRE)",
       plan_id: detail_card["plan_id"]
@@ -66,7 +80,7 @@ class RemediationFlowIntegrationTest < ActionDispatch::IntegrationTest
     approval_json = JSON.parse(response.body)
     assert_equal "executed", approval_json["status"]
 
-    # 4. Verify Incident is resolved and ActionCard shows merged & synced
+    # 5. Verify Incident is resolved and ActionCard shows merged & synced
     approved_incident = approval_json["incident"]
     assert_equal "resolved", approved_incident["status"]
     assert_not_nil approved_incident["resolved_at"]

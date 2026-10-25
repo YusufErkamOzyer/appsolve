@@ -55,9 +55,23 @@ class ChallengerSev2RemediationTest < ActionDispatch::IntegrationTest
     assert_equal "investigating", incident["status"]
     assert_nil incident["resolved_at"]
 
-    # Verify ActionCard metadata attached
-    action_card = incident["action_card"]
-    assert_not_nil action_card, "ActionCard must be present in response"
+    # Verify Stage 1 Proposal ActionCard attached
+    proposal_card = incident["action_card"]
+    assert_not_nil proposal_card, "ActionCard must be present in response"
+    assert_equal "plan_proposal", proposal_card["plan_stage"]
+    assert_equal "src/services/cart.service.ts", proposal_card["affected_file"]
+
+    # Trigger Stage 1 plan approval -> Generates patch & creates PR
+    post "/api/v1/incidents/#{incident_id}/approve_plan", params: {
+      approved_by: "Ahmet (Challenger Senior SRE)",
+      plan_id: proposal_card["plan_id"]
+    }, as: :json
+
+    assert_response :success
+    stage1_json = JSON.parse(response.body)
+    action_card = stage1_json["incident"]["action_card"]
+    assert_not_nil action_card
+    assert_equal "pr_review", action_card["plan_stage"]
     assert_match(/^appsolve\/fix-/, action_card["github_branch"])
     assert_kind_of Integer, action_card["github_pr_number"]
     assert_includes action_card["github_pr_url"], "/pull/#{action_card['github_pr_number']}"
@@ -81,7 +95,7 @@ class ChallengerSev2RemediationTest < ActionDispatch::IntegrationTest
     assert_equal action_card["github_pr_number"], detail_card["github_pr_number"]
     assert_equal "pending", detail_card["merge_status"]
 
-    # Trigger plan approval
+    # Trigger Stage 2 PR merge approval
     post "/api/v1/incidents/#{incident_id}/approve_plan", params: {
       approved_by: "Ahmet (Challenger Senior SRE)",
       plan_id: action_card["plan_id"]
@@ -128,9 +142,18 @@ class ChallengerSev2RemediationTest < ActionDispatch::IntegrationTest
 
     assert_not_nil action_card
     assert_equal "src/services/cart.service.ts", action_card["affected_file"]
-    assert_match(/^appsolve\/fix-/, action_card["github_branch"])
-    assert_equal "pending", action_card["merge_status"]
-    assert_includes action_card["diff_content"], "--- a/src/services/cart.service.ts"
+
+    # Stage 1 approval generates patch and creates PR
+    post "/api/v1/incidents/#{incident['id']}/approve_plan", params: {
+      approved_by: "Ahmet",
+      plan_id: action_card["plan_id"]
+    }, as: :json
+    assert_response :success
+    pr_card = JSON.parse(response.body)["incident"]["action_card"]
+
+    assert_match(/^appsolve\/fix-/, pr_card["github_branch"])
+    assert_equal "pending", pr_card["merge_status"]
+    assert_includes pr_card["diff_content"], "--- a/src/services/cart.service.ts"
   end
 
   test "2B. Error state: empty string stack trace falls back gracefully" do
@@ -183,9 +206,17 @@ class ChallengerSev2RemediationTest < ActionDispatch::IntegrationTest
 
     assert_response :created
     json = JSON.parse(response.body)
+    incident_id = json.dig("incident", "id")
     action_card = json.dig("incident", "action_card")
     assert_equal "quickcart/cart/calculator.py", action_card["affected_file"]
-    assert_includes action_card["diff_content"], "--- a/quickcart/cart/calculator.py"
+
+    post "/api/v1/incidents/#{incident_id}/approve_plan", params: {
+      approved_by: "Ahmet",
+      plan_id: action_card["plan_id"]
+    }, as: :json
+    assert_response :success
+    pr_card = JSON.parse(response.body)["incident"]["action_card"]
+    assert_includes pr_card["diff_content"], "--- a/quickcart/cart/calculator.py"
   end
 
   # =========================================================================
@@ -209,13 +240,22 @@ class ChallengerSev2RemediationTest < ActionDispatch::IntegrationTest
     action_card = json["incident"]["action_card"]
 
     assert_equal "src/services/non_existent_coupon_module_99.ts", action_card["affected_file"]
-    assert_includes action_card["diff_content"], "--- a/src/services/non_existent_coupon_module_99.ts"
-    assert_includes action_card["diff_content"], "+++ b/src/services/non_existent_coupon_module_99.ts"
 
-    # Verify plan approval still succeeds cleanly
+    # Stage 1: Approve proposal -> creates PR with fallback diff
     post "/api/v1/incidents/#{incident_id}/approve_plan", params: {
       approved_by: "Deniz (Challenger SRE)",
       plan_id: action_card["plan_id"]
+    }, as: :json
+
+    assert_response :success
+    pr_card = JSON.parse(response.body)["incident"]["action_card"]
+    assert_includes pr_card["diff_content"], "--- a/src/services/non_existent_coupon_module_99.ts"
+    assert_includes pr_card["diff_content"], "+++ b/src/services/non_existent_coupon_module_99.ts"
+
+    # Stage 2: Approve PR merge -> resolves incident cleanly
+    post "/api/v1/incidents/#{incident_id}/approve_plan", params: {
+      approved_by: "Deniz (Challenger SRE)",
+      plan_id: pr_card["plan_id"]
     }, as: :json
 
     assert_response :success
@@ -235,16 +275,24 @@ class ChallengerSev2RemediationTest < ActionDispatch::IntegrationTest
 
     assert_response :created
     json = JSON.parse(response.body)
+    incident_id = json["incident"]["id"]
     action_card = json["incident"]["action_card"]
     assert_equal "unknown/path/config.xyz", action_card["affected_file"]
-    assert_includes action_card["diff_content"], "--- a/unknown/path/config.xyz"
+
+    post "/api/v1/incidents/#{incident_id}/approve_plan", params: {
+      approved_by: "Ahmet",
+      plan_id: action_card["plan_id"]
+    }, as: :json
+    assert_response :success
+    pr_card = JSON.parse(response.body)["incident"]["action_card"]
+    assert_includes pr_card["diff_content"], "--- a/unknown/path/config.xyz"
   end
 
   # =========================================================================
   # 4. ERROR STATE: Already Merged PR
   # =========================================================================
   test "4A. Error state: duplicate plan approval on already resolved incident returns 422 ALREADY_RESOLVED" do
-    # 1. Create and approve incident first time
+    # 1. Create and approve incident (Stage 1: proposal -> PR; Stage 2: PR review -> resolve)
     post "/api/v1/telemetry/signals", params: {
       service_slug: "cart",
       error_code: "ERR_COUPON_CALCULATION",
@@ -255,12 +303,19 @@ class ChallengerSev2RemediationTest < ActionDispatch::IntegrationTest
     assert_response :created
     incident_id = JSON.parse(response.body)["incident"]["id"]
 
+    # Stage 1
     post "/api/v1/incidents/#{incident_id}/approve_plan", params: {
       approved_by: "Ahmet"
     }, as: :json
     assert_response :success
 
-    # 2. Try approving plan second time on already resolved incident
+    # Stage 2
+    post "/api/v1/incidents/#{incident_id}/approve_plan", params: {
+      approved_by: "Ahmet"
+    }, as: :json
+    assert_response :success
+
+    # 2. Try approving plan third time on already resolved incident
     post "/api/v1/incidents/#{incident_id}/approve_plan", params: {
       approved_by: "Ahmet"
     }, as: :json
@@ -282,13 +337,19 @@ class ChallengerSev2RemediationTest < ActionDispatch::IntegrationTest
     assert_response :created
     json = JSON.parse(response.body)
     incident_id = json["incident"]["id"]
-    pr_number = json["incident"]["action_card"]["github_pr_number"]
+
+    # Stage 1: Approve proposal to generate branch & PR
+    post "/api/v1/incidents/#{incident_id}/approve_plan", params: {
+      approved_by: "Fatma (On-Call SRE)"
+    }, as: :json
+    assert_response :success
+    pr_number = JSON.parse(response.body).dig("incident", "action_card", "github_pr_number")
 
     # Pre-merge the PR directly in GitProvider (simulating external merge on GitHub)
     provider = AiSre::GitProvider.current
     provider.merge_pull_request(pr_number: pr_number)
 
-    # Now engineer triggers approve_plan in Appsolve
+    # Now engineer triggers Stage 2 approve_plan in Appsolve
     post "/api/v1/incidents/#{incident_id}/approve_plan", params: {
       approved_by: "Fatma (On-Call SRE)"
     }, as: :json
@@ -349,6 +410,14 @@ class ChallengerSev2RemediationTest < ActionDispatch::IntegrationTest
     }, as: :json
 
     assert_response :created
+    incident_id = JSON.parse(response.body).dig("incident", "id")
+
+    # Stage 1: Approve proposal to generate patch and PR
+    post "/api/v1/incidents/#{incident_id}/approve_plan", params: {
+      approved_by: "Ahmet"
+    }, as: :json
+    assert_response :success
+
     action_card = JSON.parse(response.body).dig("incident", "action_card")
     assert_includes action_card["diff_content"], "--- a/src/services/cart.service.ts"
     assert_includes action_card["diff_content"], "+++ b/src/services/cart.service.ts"

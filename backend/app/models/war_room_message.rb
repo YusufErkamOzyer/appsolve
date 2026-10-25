@@ -1,6 +1,6 @@
 class WarRoomMessage < ApplicationRecord
   MESSAGE_TYPES = %w[text action_card system_diagnostic].freeze
-  ACTION_STATUSES = %w[pending autonomous_executed executed rejected locked].freeze
+  ACTION_STATUSES = %w[pending autonomous_executed executed rejected locked plan_approved].freeze
 
   belongs_to :incident
 

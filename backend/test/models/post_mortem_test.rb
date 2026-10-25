@@ -32,7 +32,7 @@ class PostMortemTest < ActiveSupport::TestCase
       root_cause: "Kök neden"
     )
 
-    assert_equal "@solver (Gemini AI SRE Ajanı)", pm.generated_by
+    assert_equal "@solver", pm.generated_by
     assert_equal [], pm.affected_services
     assert_equal [], pm.action_items
   end

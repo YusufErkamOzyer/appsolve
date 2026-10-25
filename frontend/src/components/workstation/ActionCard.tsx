@@ -14,14 +14,12 @@ interface ActionCardProps {
   incident: Incident;
   message?: WarRoomMessage;
   onActionComplete?: () => void;
-  onRequestRevision?: (planId: string) => void;
 }
 
 export function ActionCard({
   incident,
   message,
   onActionComplete,
-  onRequestRevision,
 }: ActionCardProps) {
   const [loadingAction, setLoadingAction] = useState<"approve" | "reject" | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
@@ -72,9 +70,10 @@ export function ActionCard({
   const isExecuted =
     actionStatus === "executed" ||
     actionStatus === "autonomous_executed" ||
+    actionStatus === "plan_approved" ||
     (isResolved && terminalOutput);
   const isRejected = actionStatus === "rejected";
-  const isMerged = payload.merge_status === "merged" || (hasPr && isExecuted);
+  const isMerged = payload.merge_status === "merged" || (hasPr && (isExecuted && actionStatus !== "plan_approved"));
   const isPrPending = hasPr && !isMerged && !isRejected && !isExecuted;
 
   const isDeadlockTool =
@@ -125,10 +124,17 @@ export function ActionCard({
   };
 
   const renderStatusBadge = () => {
-    if (hasPr && (isMerged || isExecuted)) {
+    if (hasPr && (isMerged || isExecuted) && actionStatus !== "plan_approved") {
       return (
         <span className="px-2 py-0.5 bg-[#1E8E5A] text-[#FFFFFF] font-mono text-[9px] font-bold border border-[#522D60] inline-flex items-center gap-1">
           <span>✓</span> PR BİRLEŞTİRİLDİ
+        </span>
+      );
+    }
+    if (actionStatus === "plan_approved") {
+      return (
+        <span className="px-2 py-0.5 bg-[#1E8E5A] text-[#FFFFFF] font-mono text-[9px] font-bold border border-[#522D60] inline-flex items-center gap-1">
+          <span>✓</span> PLAN ONAYLANDI (PR HAZIRLANDI)
         </span>
       );
     }
@@ -157,6 +163,13 @@ export function ActionCard({
       return (
         <span className="px-2 py-0.5 bg-[#F2A67B] text-[#522D60] font-mono text-[9px] font-bold border border-[#522D60] animate-pulse">
           ● PR BİRLEŞTİRME BEKLİYOR
+        </span>
+      );
+    }
+    if (incident.severity === "SEV-2" || payload.plan_stage === "plan_proposal") {
+      return (
+        <span className="px-2 py-0.5 bg-[#F2A67B] text-[#522D60] font-mono text-[9px] font-bold border border-[#522D60] animate-pulse">
+          ● İMPLEMENTASYON PLANI ONAYI BEKLİYOR
         </span>
       );
     }
@@ -490,7 +503,17 @@ export function ActionCard({
             {/* State-specific Actions */}
             {isExecuted ? (
               <div className="space-y-2">
-                {hasPr ? (
+                {actionStatus === "plan_approved" ? (
+                  <div className="p-2.5 bg-[#EEFBF3] border-[1.5px] border-[#1E8E5A] text-center font-bold text-[11px] text-[#1E8E5A] space-y-1">
+                    <div className="flex items-center justify-center gap-1.5">
+                      <span>✓</span>
+                      <span>İMPLEMENTASYON PLANI ONAYLANDI</span>
+                    </div>
+                    <div className="text-[10px] font-mono text-[#1E8E5A]/90">
+                      GitHub PR açıldı ve kod incelemeniz için yeni eylem kartı olarak eklendi.
+                    </div>
+                  </div>
+                ) : hasPr ? (
                   <div className="p-2.5 bg-[#EEFBF3] border-[1.5px] border-[#1E8E5A] text-center font-bold text-[11px] text-[#1E8E5A] space-y-1">
                     <div className="flex items-center justify-center gap-1.5">
                       <span>✓</span>
@@ -540,7 +563,7 @@ export function ActionCard({
                 ✕ PLAN REDDEDİLDİ — @solver&apos;dan yeni talimatla revize plan istenebilir
               </div>
             ) : (
-              /* Ready for One-Click Execution */
+              /* Ready for Approval */
               <div className="space-y-2">
                 {isPrPending ? (
                   <button
@@ -570,28 +593,20 @@ export function ActionCard({
                     <span>{loadingAction === "approve" ? "⏳" : "⚡"}</span>
                     <span>
                       {loadingAction === "approve"
-                        ? "[ PLAN İCRA EDİLİYOR... ]"
-                        : `[ ⚡ ONAYLA VE ÇALIŞTIR (${planId}) ]`}
+                        ? "[ İŞLEM YÜRÜTÜLÜYOR... ]"
+                        : incident.severity === "SEV-2" || payload.plan_stage === "plan_proposal"
+                        ? `[ ⚡ PLANI ONAYLA VE PR HAZIRLA (${planId}) ]`
+                        : `[ ⚡ PLANI ONAYLA VE UYGULA (${planId}) ]`}
                     </span>
                   </button>
                 )}
 
                 <div className="flex gap-2">
-                  {onRequestRevision && (
-                    <button
-                      type="button"
-                      onClick={() => onRequestRevision(planId)}
-                      disabled={loadingAction !== null}
-                      className="flex-1 py-1 px-2 bg-[#FAF6F2] hover:bg-[#FFFFFF] text-[#522D60] border border-[#522D60]/50 font-mono text-[10px] font-bold cursor-pointer transition-none"
-                    >
-                      [ 💬 @solver&apos;dan Revize İste ]
-                    </button>
-                  )}
                   <button
                     type="button"
                     onClick={handleReject}
                     disabled={loadingAction !== null}
-                    className="py-1 px-3 bg-[#FFFFFF] hover:bg-[#FAF6F2] text-[#80426E] border border-[#522D60]/40 font-mono text-[10px] font-bold cursor-pointer transition-none"
+                    className="w-full py-1.5 px-3 bg-[#FFFFFF] hover:bg-[#FAF6F2] text-[#80426E] border border-[#522D60]/40 font-mono text-[10px] font-bold cursor-pointer transition-none"
                   >
                     {loadingAction === "reject" ? "Reddediliyor..." : "[ REDDET ]"}
                   </button>

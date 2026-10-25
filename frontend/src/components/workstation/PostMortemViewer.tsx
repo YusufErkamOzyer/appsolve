@@ -50,10 +50,10 @@ export function PostMortemViewer({
         <RetroThinkingOrb
           statusText={
             isResolved
-              ? "Hata çözüldü — Gemini Flash (3.8 / 3.6 kota duyarlı) ile Post-Mortem raporu yazılıyor..."
+              ? "Hata çözüldü — @solver Post-Mortem analiz raporunu hazırlıyor..."
               : incident.ai_status_text || `Olay ${incident.severity || "inceleniyor"}. Çözüldüğü anda otomatik Post-Mortem raporu sentezlenecektir.`
           }
-          stageLabel={isResolved ? "GEMINI FLASH RAPORLAMA MOTORU" : "AI SRE KRİZ ODASI"}
+          stageLabel={isResolved ? "@SOLVER RAPORLAMA" : "@SOLVER KRİZ ODASI"}
         />
 
         <div className="text-center font-mono text-[11px] text-[#80426E]">
@@ -78,10 +78,10 @@ export function PostMortemViewer({
 
   const solutionPathLabel =
     incident.severity === "SEV-3"
-      ? "Yol A (Tam Otonom İnsansız Akış)"
+      ? "Otonom Müdahale"
       : incident.severity === "SEV-2"
-      ? "Yol B (Tek Tıkla Eylem Planı Onayı)"
-      : "Yol C (Mühendis + @solver War Room İşbirliği)";
+      ? "Eylem Planı ve PR Onayı"
+      : "War Room Ortak Müdahale";
 
   const handleCopyMarkdown = async () => {
     try {
@@ -130,7 +130,7 @@ ${servicesList}
 ${actionsList}
 
 ---
-*Bu rapor Appsolve AI SRE Agent Engine (Google Gemini 2.5 Flash) tarafından otomatik üretilmiştir.*`;
+*Bu rapor @solver (Appsolve AI SRE Ajanı) tarafından otomatik üretilmiştir.*`;
 
       await navigator.clipboard.writeText(md);
       setIsCopied(true);
@@ -344,10 +344,10 @@ ${actionsList}
                 Rapor Üretici:
               </span>
               <strong className="text-xs text-[#522D60] block">
-                {postMortem.generated_by}
+                @solver
               </strong>
               <span className="text-[10px] text-[#80426E]">
-                Gemini Flash (3.8 / 3.6)
+                Otonom SRE Ajanı
               </span>
             </div>
           </div>
@@ -445,7 +445,7 @@ ${actionsList}
         {/* Section 5: Blameless SRE Stamp */}
         <div className="pt-2 border-t border-[#522D60]/15 flex items-center justify-between font-mono text-[10px] text-[#80426E]">
           <span>Appsolve OS1 // Blameless Post-Mortem Standardı</span>
-          <span>Google Gemini Flash Engine (3.8 / 3.6 Kota Duyarlı)</span>
+          <span className="text-[#1E8E5A] font-bold">✓ @solver // Otonom SRE Motoru</span>
         </div>
       </div>
     </div>

@@ -60,7 +60,11 @@ class PublicStatusPageFlowTest < ActionDispatch::IntegrationTest
       refute_match(/nan error|promo_v2|redis promo cache/i, up["public_message"])
     end
 
-    # Approve plan for SEV-2
+    # Approve plan for SEV-2 (Stage 1: proposal -> PR; Stage 2: merge -> resolve)
+    post "/api/v1/incidents/#{cart_incident_id}/approve_plan", params: {
+      approved_by: "Nöbetçi Mühendis"
+    }
+    assert_response :success
     post "/api/v1/incidents/#{cart_incident_id}/approve_plan", params: {
       approved_by: "Nöbetçi Mühendis"
     }

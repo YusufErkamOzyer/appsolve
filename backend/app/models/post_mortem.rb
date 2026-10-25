@@ -25,7 +25,7 @@ class PostMortem < ApplicationRecord
     <<~MARKDOWN
       # POST-MORTEM RAPORU // #{inc&.incident_code || '#INC-XXX'}
       > **Sistem:** Appsolve Otonom AI Olay Yönetimi Platformu (`APPSOLVE.OS1`)  
-      > **Raporu Hazırlayan:** #{generated_by.presence || '@solver (Gemini AI SRE Ajanı)'}  
+      > **Raporu Hazırlayan:** #{generated_by.presence || '@solver'}  
       > **Rapor Tarihi:** #{created_at ? created_at.strftime("%Y-%m-%d %H:%M:%S UTC") : Time.current.strftime("%Y-%m-%d %H:%M:%S UTC")}  
 
       ---
@@ -39,7 +39,7 @@ class PostMortem < ApplicationRecord
       - **Başlangıç Zamanı:** #{created_str}
       - **Çözüm Zamanı:** #{resolved_str}
       - **MTTR (Toplam Kesinti / Çözüm Süresi):** #{mttr_formatted.presence || "#{duration_seconds || 0} sn"}
-      - **Çözüm Yolu:** #{inc&.severity == 'SEV-3' ? 'Yol A (Tam Otonom İnsansız Akış)' : (inc&.severity == 'SEV-2' ? 'Yol B (Tek Tıkla Plan Onayı)' : 'Yol C (Mühendis + @solver War Room İşbirliği)')}
+      - **Çözüm Metodolojisi:** #{inc&.severity == 'SEV-3' ? 'Otonom Müdahale' : (inc&.severity == 'SEV-2' ? 'Eylem Planı ve PR Onayı' : 'War Room Ortak Müdahale')}
 
       ---
 
@@ -62,7 +62,7 @@ class PostMortem < ApplicationRecord
       #{actions_md}
 
       ---
-      *Bu rapor Appsolve AI SRE Agent Engine (Google Gemini 2.5 Flash) tarafından otomatik üretilmiştir.*
+      *Bu rapor @solver (Appsolve AI SRE Ajanı) tarafından otomatik üretilmiştir.*
     MARKDOWN
   end
 
@@ -71,6 +71,6 @@ class PostMortem < ApplicationRecord
   def set_defaults
     self.affected_services ||= []
     self.action_items ||= []
-    self.generated_by = "@solver (Gemini AI SRE Ajanı)" if generated_by.blank? || generated_by == "AI SRE Agent"
+    self.generated_by = "@solver" if generated_by.blank? || generated_by.include?("Gemini") || generated_by == "AI SRE Agent"
   end
 end

@@ -109,6 +109,11 @@ class Api::V1::IncidentsControllerTest < ActionDispatch::IntegrationTest
     )
     AiSre::RemediationService.route_after_triage!(sev2_incident)
 
+    # Stage 1: Approve proposal plan -> opens PR
+    post approve_plan_api_v1_incident_url(sev2_incident), params: { approved_by: "Deniz (On-Call SRE)" }, as: :json
+    assert_response :success
+
+    # Stage 2: Approve PR -> merges PR and resolves incident
     post approve_plan_api_v1_incident_url(sev2_incident), params: { approved_by: "Deniz (On-Call SRE)" }, as: :json
     assert_response :success
 
