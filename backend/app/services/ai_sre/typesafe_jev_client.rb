@@ -148,17 +148,37 @@ module AiSre
       raw_score = score_ans[:score].to_f
       chosen_category = cat_ans[:choice].to_s
 
-      # Truth Table Decision Logic
-      severity, category, tool_name, risk_level =
-        if blocks_checkout >= NOUL_HIGH_THRESHOLD || chosen_category == "database_deadlock" || raw_score >= 1.5
-          [ "SEV-1", "database_deadlock", "kill_db_locks_and_failover", "high" ]
-        elsif is_cache_bloat >= NOUL_HIGH_THRESHOLD || chosen_category == "cache_resource_bloat" || raw_score < 0.5
-          [ "SEV-3", "cache_resource_bloat", "flush_cache", "low" ]
-        elsif is_code_bug >= NOUL_HIGH_THRESHOLD || chosen_category == "application_code_bug" || (raw_score >= 0.5 && raw_score < 1.5)
-          [ "SEV-2", "application_code_bug", "rollback_feature_flag", "medium" ]
-        else
-          [ "SEV-2", chosen_category.presence || "application_code_bug", "rollback_feature_flag", "medium" ]
-        end
+      # Truth Table Decision Logic (Judgments from Jev, decisions in code)
+      category = if chosen_category.present? && chosen_category != "null"
+        chosen_category
+      elsif blocks_checkout >= NOUL_HIGH_THRESHOLD
+        "database_deadlock"
+      elsif is_cache_bloat >= NOUL_HIGH_THRESHOLD
+        "cache_resource_bloat"
+      elsif is_code_bug >= NOUL_HIGH_THRESHOLD
+        "application_code_bug"
+      else
+        "application_code_bug"
+      end
+
+      severity = if blocks_checkout >= NOUL_HIGH_THRESHOLD || category == "database_deadlock" || raw_score >= 1.5
+        "SEV-1"
+      elsif is_cache_bloat >= NOUL_HIGH_THRESHOLD || (category == "cache_resource_bloat" && raw_score < 1.0) || raw_score < 0.5
+        "SEV-3"
+      else
+        "SEV-2"
+      end
+
+      tool_name, risk_level = case category
+      when "database_deadlock"
+        [ "kill_db_locks_and_failover", "high" ]
+      when "cache_resource_bloat"
+        [ "flush_cache", "low" ]
+      when "auth_session_failure"
+        [ "rollback_feature_flag", (severity == "SEV-1" ? "high" : "medium") ]
+      else
+        [ "rollback_feature_flag", (severity == "SEV-1" ? "high" : "medium") ]
+      end
 
       {
         provider: "typesafe_jev",
