@@ -85,10 +85,12 @@ ${colors.bold}USAGE:${colors.reset}
   bin/chaos <command> [scenario] [options]
 
 ${colors.bold}COMMANDS:${colors.reset}
-  ${colors.bold}inject <sev1|sev2|sev3>${colors.reset}   Inject a specific chaos failure scenario:
-                           • ${colors.red}sev1${colors.reset} : Checkout DB Deadlock (HTTP 504 DB_LOCK_TIMEOUT, SEV-1 telemetry)
-                           • ${colors.yellow}sev2${colors.reset} : Cart Coupon Bug (TypeError / NaN, GitHub PR & Action Card)
-                           • ${colors.blue}sev3${colors.reset} : Catalog Cache Bloat (12,000 keys, autonomous bridge purge)
+  ${colors.bold}inject <scenario>${colors.reset}       Inject a specific chaos failure scenario:
+                           • ${colors.red}sev1${colors.reset}      : Checkout DB Deadlock (HTTP 504 DB_LOCK_TIMEOUT)
+                           • ${colors.yellow}sev2${colors.reset}      : Cart Coupon Bug (TypeError / NaN)
+                           • ${colors.blue}sev3${colors.reset}      : Catalog Cache Bloat (12,000 keys)
+                           • ${colors.magenta}tax-bug${colors.reset}   : Unassigned SEV - Dynamic Tax Calculation Crash (HTTP 500)
+                           • ${colors.magenta}inventory${colors.reset} : Unassigned SEV - Realtime Inventory Sync Crash (HTTP 500)
   ${colors.bold}reset${colors.reset}                  Reset all chaos state, release locks, and purge cache
   ${colors.bold}status${colors.reset}                 Inspect live health, DB locks, cache pressure, and Appsolve incidents
   ${colors.bold}ai-disconnect / disconnect${colors.reset} Disconnect AI automation (Token Saving Mode for mobile tests)
@@ -164,13 +166,15 @@ async function handleInject(options) {
   const aliasMap = {
     'sev1': 'sev1', 'sev-1': 'sev1', 'deadlock': 'sev1', 'db-lock': 'sev1', 'checkout-lock': 'sev1',
     'sev2': 'sev2', 'sev-2': 'sev2', 'coupon-bug': 'sev2', 'coupon': 'sev2', 'cart-bug': 'sev2',
-    'sev3': 'sev3', 'sev-3': 'sev3', 'cache-bloat': 'sev3', 'cache': 'sev3', 'bloat': 'sev3'
+    'sev3': 'sev3', 'sev-3': 'sev3', 'cache-bloat': 'sev3', 'cache': 'sev3', 'bloat': 'sev3',
+    'tax': 'tax', 'tax-bug': 'tax', 'kdv': 'tax', 'vergi': 'tax',
+    'inventory': 'inventory', 'inventory-bug': 'inventory', 'stock': 'inventory', 'stok': 'inventory'
   };
   const normalized = aliasMap[scenario] || scenario.replace(/^sev-?/, 'sev');
 
-  if (!['sev1', 'sev2', 'sev3'].includes(normalized)) {
-    console.error(`${colors.red}Error: Invalid scenario '${options.scenario}'. Must be deadlock (or sev1), coupon-bug (or sev2), or cache-bloat (or sev3).${colors.reset}`);
-    console.error(`Usage: bin/chaos inject <deadlock|coupon-bug|cache-bloat|sev1|sev2|sev3>`);
+  if (!['sev1', 'sev2', 'sev3', 'tax', 'inventory'].includes(normalized)) {
+    console.error(`${colors.red}Error: Invalid scenario '${options.scenario}'. Must be deadlock (sev1), coupon-bug (sev2), cache-bloat (sev3), tax-bug, or inventory-bug.${colors.reset}`);
+    console.error(`Usage: bin/chaos inject <deadlock|coupon-bug|cache-bloat|tax-bug|inventory-bug>`);
     process.exit(1);
   }
 
@@ -315,6 +319,85 @@ async function handleInject(options) {
     console.log(`${colors.bold}  Error Code:     ${colors.white}ERR_CACHE_BLOAT${colors.reset}`);
     console.log(`${colors.bold}  Guardrail Mode: ${colors.green}full_autonomy${colors.reset} (Autonomous resolution without manual approval)`);
     console.log(`${colors.bold}  Remediation:    ${colors.cyan}Bridge autonomously executes 'purge_cache'${colors.reset}`);
+    console.log(`${colors.bold}  To Reset:       ${colors.cyan}bin/chaos reset${colors.reset}`);
+    console.log(`${colors.bold}${colors.green}================================================================${colors.reset}\n`);
+
+  } else if (normalized === 'tax') {
+    // ----------------------------------------------------
+    // UNASSIGNED SEV: Tax Calculation Bug Injection
+    // ----------------------------------------------------
+    console.log(`${colors.bold}[1/3] Injecting tax calculation bug (EU_UNCONFIGURED_TAX_ZONE rate missing)...${colors.reset}`);
+    const injectRes = await apiRequest(`${options.quickcartUrl}/api/chaos/inject/tax-bug`, 'POST', {});
+    if (!injectRes.ok) {
+      console.error(`${colors.red}✖ Failed to inject tax bug: ${injectRes.status} ${JSON.stringify(injectRes.data || injectRes.error)}${colors.reset}`);
+      process.exit(1);
+    }
+    console.log(`${colors.green}✔ Tax calculation bug injected:${colors.reset} ${injectRes.data?.message || 'Bug active'}`);
+
+    if (options.simulateTraffic) {
+      console.log(`${colors.bold}[2/3] Simulating cart fetch traffic to trip tax calculation error & forward telemetry...${colors.reset}`);
+      const cartId = `chaos_tax_probe_${Date.now()}`;
+      await apiRequest(`${options.quickcartUrl}/api/cart/items`, 'POST', { cart_id: cartId, product_id: 1, quantity: 1 });
+      const cartRes = await apiRequest(`${options.quickcartUrl}/api/cart?cart_id=${cartId}`, 'GET');
+
+      if (cartRes.status === 500) {
+        console.log(`${colors.green}✔ Cart calculation threw TypeError as expected:${colors.reset} HTTP 500 ERR_TAX_CALCULATION`);
+        console.log(`${colors.green}✔ QuickCart Telemetry Forwarder emitted signal with SEV UNASSIGNED to Appsolve!${colors.reset}`);
+      } else {
+        console.log(`${colors.yellow}ℹ Cart endpoint returned status ${cartRes.status}:${colors.reset}`, cartRes.data);
+      }
+    }
+
+    console.log(`${colors.bold}[3/3] Inspecting triage path...${colors.reset}`);
+    console.log(`  Telemetry severity: ${colors.magenta}UNASSIGNED (Dynamic AI Triage)${colors.reset}`);
+    console.log(`  TypeSafe Jev analyzes error impact on cart & checkout to classify severity dynamically.`);
+
+    console.log(`\n${colors.bold}${colors.green}================================================================${colors.reset}`);
+    console.log(`${colors.bold}${colors.green}  ✔ TAX CALCULATION BUG INJECTED (UNASSIGNED SEV)${colors.reset}`);
+    console.log(`${colors.bold}  Severity:       ${colors.magenta}UNASSIGNED (Evaluated by TypeSafe Jev AI)${colors.reset}`);
+    console.log(`${colors.bold}  Error Code:     ${colors.white}ERR_TAX_CALCULATION${colors.reset}`);
+    console.log(`${colors.bold}  Impact:         ${colors.yellow}Cart and checkout total calculations crash on client${colors.reset}`);
+    console.log(`${colors.bold}  To Reset:       ${colors.cyan}bin/chaos reset${colors.reset}`);
+    console.log(`${colors.bold}${colors.green}================================================================${colors.reset}\n`);
+
+  } else if (normalized === 'inventory') {
+    // ----------------------------------------------------
+    // UNASSIGNED SEV: Inventory Sync Bug Injection
+    // ----------------------------------------------------
+    console.log(`${colors.bold}[1/3] Injecting inventory sync bug (warehouse realtime channel missing)...${colors.reset}`);
+    const injectRes = await apiRequest(`${options.quickcartUrl}/api/chaos/inject/inventory-bug`, 'POST', {});
+    if (!injectRes.ok) {
+      console.error(`${colors.red}✖ Failed to inject inventory bug: ${injectRes.status} ${JSON.stringify(injectRes.data || injectRes.error)}${colors.reset}`);
+      process.exit(1);
+    }
+    console.log(`${colors.green}✔ Inventory sync bug injected:${colors.reset} ${injectRes.data?.message || 'Bug active'}`);
+
+    if (options.simulateTraffic) {
+      console.log(`${colors.bold}[2/3] Simulating add-to-cart traffic to trip inventory reservation error & forward telemetry...${colors.reset}`);
+      const cartId = `chaos_inventory_probe_${Date.now()}`;
+      const addRes = await apiRequest(`${options.quickcartUrl}/api/cart/items`, 'POST', {
+        cart_id: cartId,
+        product_id: 1,
+        quantity: 1
+      });
+
+      if (addRes.status === 500) {
+        console.log(`${colors.green}✔ Add to cart threw TypeError as expected:${colors.reset} HTTP 500 ERR_INVENTORY_SYNC`);
+        console.log(`${colors.green}✔ QuickCart Telemetry Forwarder emitted signal with SEV UNASSIGNED to Appsolve!${colors.reset}`);
+      } else {
+        console.log(`${colors.yellow}ℹ Add item endpoint returned status ${addRes.status}:${colors.reset}`, addRes.data);
+      }
+    }
+
+    console.log(`${colors.bold}[3/3] Inspecting triage path...${colors.reset}`);
+    console.log(`  Telemetry severity: ${colors.magenta}UNASSIGNED (Dynamic AI Triage)${colors.reset}`);
+    console.log(`  TypeSafe Jev analyzes inventory reservation failure on add-to-cart.`);
+
+    console.log(`\n${colors.bold}${colors.green}================================================================${colors.reset}`);
+    console.log(`${colors.bold}${colors.green}  ✔ INVENTORY SYNC BUG INJECTED (UNASSIGNED SEV)${colors.reset}`);
+    console.log(`${colors.bold}  Severity:       ${colors.magenta}UNASSIGNED (Evaluated by TypeSafe Jev AI)${colors.reset}`);
+    console.log(`${colors.bold}  Error Code:     ${colors.white}ERR_INVENTORY_SYNC${colors.reset}`);
+    console.log(`${colors.bold}  Impact:         ${colors.yellow}Customers cannot add items to cart (HTTP 500 Modal Pop-up)${colors.reset}`);
     console.log(`${colors.bold}  To Reset:       ${colors.cyan}bin/chaos reset${colors.reset}`);
     console.log(`${colors.bold}${colors.green}================================================================${colors.reset}\n`);
   }
