@@ -6,7 +6,6 @@ import { Incident, sendWarRoomMessage } from "@/lib/api";
 import { SlaCountdown } from "./SlaCountdown";
 import { ActionCard } from "./ActionCard";
 import { PostMortemViewer } from "./PostMortemViewer";
-import { RetroThinkingOrb } from "./RetroThinkingOrb";
 
 interface IncidentStreamProps {
   incident: Incident | null;
@@ -95,11 +94,21 @@ export function IncidentStream({
   const aiStatusText = incident.ai_status_text;
   const isJevCategorizing = !incident.severity || aiStage === "jev_categorizing";
   const jevDecision = (incident.jev_triage || (rawPayload.jev_triage as Record<string, unknown> | undefined)) as Record<string, any> | undefined;
-  const hasJevDecision = Boolean(
+
+  // Sıralı Aşama Kontrolleri ("Herkes sırasını bekleyecek")
+  // 1. Kategorizasyon kararı yalnızca kategorizasyon bittiğinde görünür
+  const showJevDecision = !isJevCategorizing && Boolean(
     jevDecision ||
     (incident.events && incident.events.some((e) => e.event_type === "jev_categorization_completed"))
   );
-  const hasAiTriage = Boolean(incident.hypothesis || incident.reasoning);
+
+  // 2. Kök neden triyajı ve güvenlik kilidi yalnızca analiz aşaması tamamlandığında görünür
+  const isAnalyzing = isJevCategorizing || aiStage === "ai_analyzing";
+  const showAiTriage = !isAnalyzing && Boolean(incident.hypothesis || incident.reasoning);
+  const showGuardrail = !isAnalyzing && incident.autonomy_mode !== "pending_triage" && Boolean(incident.severity);
+
+  // 3. İmplementasyon planı AI hazırlarken taslak olarak görünmez, yalnızca tamamlandığında görünür
+  const isPreparingPlan = isAnalyzing || ["ai_preparing_plan", "ai_inspecting_locks", "ai_autonomous_solving"].includes(aiStage || "");
 
   const createdDate = new Date(incident.created_at);
   const timeStr = createdDate.toLocaleTimeString();
@@ -336,27 +345,8 @@ export function IncidentStream({
             </div>
           </div>
 
-          {/* Card 1A: RETRO ORB (Hata İnceleniyor & @solver Ön Analizi) */}
-          {isJevCategorizing && (
-            <div className="relative space-y-1.5">
-              <div className="flex items-center gap-2 font-mono text-[10px] -ml-6 sm:-ml-8">
-                <span className="w-4 h-4 rounded-full bg-[#FFFFFF] border-2 border-[#F2A67B] flex items-center justify-center shrink-0 z-10">
-                  <span className="w-1.5 h-1.5 bg-[#F2A67B] rounded-full animate-ping" />
-                </span>
-                <span className="font-bold text-[#80426E] tabular-nums">{timeStr}</span>
-                <span className="px-1.5 py-0.2 bg-[#FAF6F2] border border-[#522D60] text-[#522D60] font-bold tracking-wider">
-                  @SOLVER ÖN ANALİZ
-                </span>
-              </div>
-              <RetroThinkingOrb
-                stageLabel="@SOLVER ÖN ANALİZ"
-                statusText={aiStatusText || "Hata inceleniyor — @solver telemetri sinyalini kategorize ediyor..."}
-              />
-            </div>
-          )}
-
-          {/* Card 1B: @SOLVER KATEGORİZASYON KARARI */}
-          {hasJevDecision && (
+          {/* Card 1B: @SOLVER KATEGORİZASYON KARARI (Sıralı Adım: Kategorizasyon tamamlandığında görünür) */}
+          {showJevDecision && (
             <div className="relative space-y-1.5">
               <div className="flex items-center gap-2 font-mono text-[10px] -ml-6 sm:-ml-8">
                 <span className="w-4 h-4 rounded-full bg-[#FFFFFF] border-2 border-[#80426E] flex items-center justify-center shrink-0 z-10">
@@ -415,8 +405,8 @@ export function IncidentStream({
             </div>
           )}
 
-          {/* Card 2: AI TRIAGE & HYPOTHESIS (Soft Lavender Tint) */}
-          {hasAiTriage && (
+          {/* Card 2: AI TRIAGE & HYPOTHESIS (Sıralı Adım: Kök neden analizi tamamlandığında görünür) */}
+          {showAiTriage && (
             <div className="relative space-y-1.5">
               <div className="flex items-center gap-2 font-mono text-[10px] -ml-6 sm:-ml-8">
                 <span className="w-4 h-4 rounded-full bg-[#FFFFFF] border-2 border-[#522D60] flex items-center justify-center shrink-0 z-10">
@@ -466,8 +456,8 @@ export function IncidentStream({
             </div>
           )}
 
-          {/* Card 3: SECURITY GUARDRAIL (Warm Amber Tint) */}
-          {incident.autonomy_mode !== "pending_triage" && incident.severity && (
+          {/* Card 3: SECURITY GUARDRAIL (Sıralı Adım: Triyaj ile birlikte görünür) */}
+          {showGuardrail && (
             <div className="relative space-y-1.5">
               <div className="flex items-center gap-2 font-mono text-[10px] -ml-6 sm:-ml-8">
                 <span className="w-4 h-4 rounded-full bg-[#FFFFFF] border-2 border-[#E6B86A] flex items-center justify-center shrink-0 z-10">
@@ -507,43 +497,15 @@ export function IncidentStream({
             </div>
           )}
 
-          {/* Card 3A: RETRO ORB (AI Plan Çıkarımı / Kod Onarımı / Kilit Taraması / Otonom Çözüm) */}
-          {aiStage && ["ai_analyzing", "ai_autonomous_solving", "ai_preparing_patch", "ai_inspecting_locks", "ai_executing_plan"].includes(aiStage) && (
-            <div className="relative space-y-1.5">
-              <div className="flex items-center gap-2 font-mono text-[10px] -ml-6 sm:-ml-8">
-                <span className="w-4 h-4 rounded-full bg-[#FFFFFF] border-2 border-[#522D60] flex items-center justify-center shrink-0 z-10">
-                  <span className="w-1.5 h-1.5 bg-[#522D60] rounded-full animate-ping" />
-                </span>
-                <span className="font-bold text-[#80426E] tabular-nums">{timeStr}</span>
-                <span className="px-1.5 py-0.2 bg-[#FAF6F2] border border-[#522D60] text-[#522D60] font-bold tracking-wider">
-                  @SOLVER AI İŞLEMİ
-                </span>
-              </div>
-              <RetroThinkingOrb
-                stageLabel={
-                  aiStage === "ai_autonomous_solving"
-                    ? "@SOLVER OTONOM MÜDAHALE"
-                    : aiStage === "ai_preparing_patch"
-                    ? "@SOLVER KOD ONARIM MOTORU"
-                    : aiStage === "ai_inspecting_locks"
-                    ? "@SOLVER VERİTABANI KİLİT TARAMASI"
-                    : aiStage === "ai_executing_plan"
-                    ? "@SOLVER İMPLEMENTASYON İCRASI"
-                    : "@SOLVER KÖK NEDEN & PLAN ÇIKARIMI"
-                }
-                statusText={aiStatusText || "Yapay zeka analiz ve kurtarma prosedürünü yürütüyor..."}
-              />
-            </div>
-          )}
-
           {/* 3. WAR ROOM COLLABORATIVE FEED (Messages, Plans & Diagnostics) */}
           {warRoomMessages.length > 0 ? (
             warRoomMessages.map((msg) => {
               const msgDate = new Date(msg.created_at);
               const msgTime = msgDate.toLocaleTimeString();
 
-              // Type A: Action Card / Implementation Plan
+              // Type A: Action Card / Implementation Plan (Sıralı Adım: AI planı tamamlayınca gösterilir)
               if (msg.message_type === "action_card") {
+                if (isPreparingPlan) return null;
                 return (
                   <ActionCard
                     key={msg.id}
@@ -628,13 +590,13 @@ export function IncidentStream({
                 </div>
               );
             })
-          ) : (
-            /* Fallback single action card if messages empty */
+          ) : !isPreparingPlan && incident.recommended_action_plan?.plan_id ? (
+            /* Fallback single action card only when plan is fully ready and approved */
             <ActionCard
               incident={incident}
               onActionComplete={onIncidentUpdated}
             />
-          )}
+          ) : null}
 
           {/* Final Resolution Summary Card when resolved */}
           {isResolved && (
@@ -686,32 +648,8 @@ export function IncidentStream({
             </div>
           )}
 
-          {/* Post-Mortem Writing In Progress Orb (@solver) */}
-          {isResolved && (!incident.post_mortem || aiStage === "writing_post_mortem") && (
-            <div className="relative space-y-1.5">
-              <div className="flex items-center gap-2 font-mono text-[10px] -ml-6 sm:-ml-8">
-                <span className="w-4 h-4 rounded-full bg-[#FFFFFF] border-2 border-[#522D60] flex items-center justify-center shrink-0 z-10">
-                  <span className="w-1.5 h-1.5 bg-[#522D60] rounded-full animate-ping" />
-                </span>
-                <span className="font-bold text-[#80426E] tabular-nums">
-                  {incident.resolved_at ? new Date(incident.resolved_at).toLocaleTimeString() : timeStr}
-                </span>
-                <span className="px-1.5 py-0.2 bg-[#FAF6F2] border border-[#522D60] text-[#522D60] font-bold tracking-wider">
-                  @SOLVER RAPORLAMA
-                </span>
-              </div>
-              <RetroThinkingOrb
-                stageLabel="@SOLVER RAPORLAMA MOTORU"
-                statusText={
-                  aiStatusText ||
-                  "Hata çözüldü — @solver Post-Mortem analiz raporunu hazırlıyor..."
-                }
-              />
-            </div>
-          )}
-
           {/* Embedded Post-Mortem Document in Stream View once generated */}
-          {isResolved && incident.post_mortem && (
+          {isResolved && incident.post_mortem && aiStage !== "writing_post_mortem" && (
             <div className="relative space-y-2 pt-2">
               <div className="flex items-center gap-2 font-mono text-[10px] -ml-6 sm:-ml-8">
                 <span className="w-4 h-4 rounded-full bg-[#FFFFFF] border-2 border-[#522D60] flex items-center justify-center shrink-0 z-10">

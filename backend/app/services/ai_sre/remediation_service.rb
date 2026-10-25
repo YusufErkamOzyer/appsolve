@@ -30,7 +30,7 @@ module AiSre
         sleep 1.2 if staged
         execute_autonomous_resolution!(staged: staged)
       elsif @incident.requires_human_approval?
-        @incident.update_ai_stage!("ai_analyzing", "SEV-2 Kriz analizi — @solver implementasyon planı hazırlıyor...")
+        @incident.update_ai_stage!("ai_preparing_plan", "SEV-2 Kriz analizi — @solver implementasyon planı hazırlıyor...")
         sleep 1.2 if staged
         prepare_human_approval_card!
         @incident.update_ai_stage!("awaiting_approval", nil)

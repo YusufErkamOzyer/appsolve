@@ -121,6 +121,10 @@ module AiSre
         next if path.start_with?("backend/") || path.start_with?("quickcart/")
         begin
           res = @git_provider.get_file(alt_path, ref: "main")
+          # Only use alt_path if it was actually found in commits or on disk, not from fallback
+          if @git_provider.is_a?(AiSre::LocalGitProvider) && !@git_provider.send(:find_file_on_disk, alt_path)
+            next
+          end
           return [alt_path, res[:content].to_s]
         rescue GitProvider::ResourceNotFoundError
           # Continue to next candidate

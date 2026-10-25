@@ -42,7 +42,7 @@ module AiSre
       )
 
       # Kullanıcı ekranında Jev kararının ve yeni SEV rozetinin hemen belirmesi için ara kayıt
-      @incident.update_ai_stage!("ai_analyzing", "#{@incident.severity} belirlendi — @solver kök neden analizi ve müdahale planı çıkarıyor...")
+      @incident.update_ai_stage!("ai_analyzing", "#{@incident.severity} belirlendi — @solver kök neden ve iş etkisi analizini yürütüyor...")
       sleep 1.2 if @staged
 
       # Adım 1B: Google AI Studio (Gemini) Ajanı ile Kök Neden Hipotezi ve Çözüm Planı Üretimi
