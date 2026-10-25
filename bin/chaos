@@ -280,7 +280,7 @@ async function handleInject(options) {
     console.log(`${colors.bold}[1/3] Injecting ${options.count} bloated cache entries into CatalogService cache...${colors.reset}`);
     const injectRes = await apiRequest(`${options.quickcartUrl}/api/chaos/bloat-cache`, 'POST', {
       count: options.count,
-      forward_telemetry: true
+      forward_telemetry: false
     });
     if (!injectRes.ok) {
       console.error(`${colors.red}✖ Failed to bloat cache: ${injectRes.status} ${JSON.stringify(injectRes.data || injectRes.error)}${colors.reset}`);

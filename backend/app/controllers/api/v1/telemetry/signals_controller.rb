@@ -2,6 +2,8 @@ module Api
   module V1
     module Telemetry
       class SignalsController < ApplicationController
+        SIGNAL_MUTEX = Mutex.new
+
         def create
           service_slug = params[:service_slug] || params[:service]
           service = Service.find_by(slug: service_slug) || Service.find_by("LOWER(name) = ?", service_slug.to_s.downcase) || Service.first
@@ -26,8 +28,25 @@ module Api
             end
           end
 
+          # Aynı hata için zaten aktif bir olay varsa yeni olay açılmasını ve AI'ın mükerrer çalışmasını engelle
+          existing_incident = SIGNAL_MUTEX.synchronize do
+            find_duplicate_incident(service, error_code)
+          end
+
+          if existing_incident
+            service.update!(last_incident_at: Time.current)
+            return render json: {
+              status: "accepted",
+              message: "Bu hata [#{error_code}] için halihazırda aktif bir olay (#{existing_incident.incident_code}) mevcut. Mükerrer olay açılması engellendi.",
+              deduplicated: true,
+              ai_automation_skipped: false,
+              incident: serialize_incident_payload(existing_incident, service, params[:severity])
+            }, status: :created
+          end
+
           # Create incident without pre-assigned severity; TypeSafe Jev + Gemini AI Triage determines severity
           initial_payload = raw_payload.except("severity", :severity).merge(
+            "error_code" => error_code,
             "ai_stage" => "jev_categorizing",
             "ai_status_text" => "Hata inceleniyor — TypeSafe Jev (System One) ile kategorize ediliyor..."
           )
@@ -83,67 +102,101 @@ module Api
             status: "accepted",
             message: triage_message,
             ai_automation_skipped: !AiSre::AutomationConfig.ai_connected?,
-            incident: {
-              id: incident.id,
-              incident_code: incident.incident_code,
-              service_slug: incident.service.slug,
-              service_name: service.name,
-              service_status: service.reload.status,
-              title: incident.title,
-              severity: params[:severity].presence || incident.severity,
-              normalized_severity: incident.severity,
-              ai_stage: incident.ai_stage,
-              ai_status_text: incident.ai_status_text,
-              jev_triage: incident.raw_payload&.dig("jev_triage"),
-              raw_payload: incident.raw_payload,
-              status: incident.status,
-              autonomy_mode: incident.autonomy_mode,
-              escalation_target: incident.escalation_target,
-              sla_deadline: incident.sla_deadline&.iso8601,
-              resolved_at: incident.resolved_at&.iso8601,
-              reasoning: incident.reasoning,
-              hypothesis: incident.hypothesis,
-              recommended_action_plan: incident.recommended_action_plan,
-              action_card: (
-                latest_card = incident.war_room_messages.to_a.reverse.find { |m| m.message_type == "action_card" }
-                (latest_card&.action_card_payload.presence || incident.recommended_action_plan || {}).slice(
-                  "plan_id", "title", "tool_name", "risk_level", "hypothesis", "reasoning", "steps", "plan_stage",
-                  "github_branch", "github_branch_url", "github_pr_number", "github_pr_url",
-                  "diff_content", "affected_file", "merge_status", "merge_commit_sha",
-                  "sre_bridge_action", "sre_bridge_status", "sre_bridge_output",
-                  "terminal_output", "verification_summary", "approved_by", "executed_at", "autonomous"
-                )
-              ),
-              created_at: incident.created_at.iso8601,
-              messages: incident.war_room_messages.map do |m|
-                {
-                  id: m.id,
-                  sender_type: m.sender_type,
-                  sender_name: m.sender_name,
-                  content: m.content,
-                  message_type: m.message_type,
-                  action_card_payload: m.action_card_payload,
-                  action_status: m.action_status,
-                  created_at: m.created_at.iso8601
-                }
-              end,
-              events: incident.incident_events.order(occurred_at: :asc, id: :asc).map do |ev|
-                {
-                  id: ev.id,
-                  event_type: ev.event_type,
-                  actor: ev.actor,
-                  title: ev.title,
-                  details: ev.details,
-                  occurred_at: ev.occurred_at.iso8601
-                }
-              end
-            }
+            incident: serialize_incident_payload(incident, service, params[:severity])
           }, status: :created
         rescue ActiveRecord::RecordInvalid => e
           render json: { error: e.message }, status: :unprocessable_entity
         end
 
         private
+
+        def find_duplicate_incident(service, error_code)
+          return nil if error_code.blank?
+
+          # 1. Aynı servis için halihazırda çözülmemiş (aktif) bir olay var mı?
+          active_incidents = Incident.active.where(service: service)
+          found = active_incidents.find do |inc|
+            inc.title.to_s.start_with?("#{error_code}:") ||
+              inc.title.to_s.include?(error_code) ||
+              inc.raw_payload&.dig("error_code") == error_code ||
+              inc.raw_payload&.dig(:error_code) == error_code
+          end
+          return found if found
+
+          # 2. SEV-3 gibi otonom çözülen olaylarda, art arda gelen anlık sinyal patlamasını
+          # yakalamak için son 8 saniye içinde çözülmüş aynı hata var mı kontrol et
+          recent_resolved = Incident.where(service: service, status: "resolved")
+                                    .where("resolved_at >= ? OR updated_at >= ?", 8.seconds.ago, 8.seconds.ago)
+                                    .order(resolved_at: :desc, id: :desc)
+                                    .first
+          if recent_resolved
+            if recent_resolved.title.to_s.start_with?("#{error_code}:") ||
+               recent_resolved.title.to_s.include?(error_code) ||
+               recent_resolved.raw_payload&.dig("error_code") == error_code
+              return recent_resolved
+            end
+          end
+
+          nil
+        end
+
+        def serialize_incident_payload(incident, service, requested_severity)
+          {
+            id: incident.id,
+            incident_code: incident.incident_code,
+            service_slug: incident.service.slug,
+            service_name: service.name,
+            service_status: service.reload.status,
+            title: incident.title,
+            severity: requested_severity.presence || incident.severity,
+            normalized_severity: incident.severity,
+            ai_stage: incident.ai_stage,
+            ai_status_text: incident.ai_status_text,
+            jev_triage: incident.raw_payload&.dig("jev_triage"),
+            raw_payload: incident.raw_payload,
+            status: incident.status,
+            autonomy_mode: incident.autonomy_mode,
+            escalation_target: incident.escalation_target,
+            sla_deadline: incident.sla_deadline&.iso8601,
+            resolved_at: incident.resolved_at&.iso8601,
+            reasoning: incident.reasoning,
+            hypothesis: incident.hypothesis,
+            recommended_action_plan: incident.recommended_action_plan,
+            action_card: (
+              latest_card = incident.war_room_messages.to_a.reverse.find { |m| m.message_type == "action_card" }
+              (latest_card&.action_card_payload.presence || incident.recommended_action_plan || {}).slice(
+                "plan_id", "title", "tool_name", "risk_level", "hypothesis", "reasoning", "steps", "plan_stage",
+                "github_branch", "github_branch_url", "github_pr_number", "github_pr_url",
+                "diff_content", "affected_file", "merge_status", "merge_commit_sha",
+                "sre_bridge_action", "sre_bridge_status", "sre_bridge_output",
+                "terminal_output", "verification_summary", "approved_by", "executed_at", "autonomous"
+              )
+            ),
+            created_at: incident.created_at.iso8601,
+            messages: incident.war_room_messages.map do |m|
+              {
+                id: m.id,
+                sender_type: m.sender_type,
+                sender_name: m.sender_name,
+                content: m.content,
+                message_type: m.message_type,
+                action_card_payload: m.action_card_payload,
+                action_status: m.action_status,
+                created_at: m.created_at.iso8601
+              }
+            end,
+            events: incident.incident_events.order(occurred_at: :asc, id: :asc).map do |ev|
+              {
+                id: ev.id,
+                event_type: ev.event_type,
+                actor: ev.actor,
+                title: ev.title,
+                details: ev.details,
+                occurred_at: ev.occurred_at.iso8601
+              }
+            end
+          }
+        end
 
         def handle_disconnected_ai(incident, service, error_code, message)
           code_upper = error_code.to_s.upcase

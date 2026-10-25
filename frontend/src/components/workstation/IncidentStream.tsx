@@ -153,7 +153,8 @@ export function IncidentStream({
       {/* 1. Window Header Bar */}
       <div className="h-9 px-3 border-b-[1.5px] border-[#522D60] bg-[#FFFFFF] flex items-center justify-between font-mono text-[11px] shrink-0">
         <div className="flex items-center gap-2 font-bold text-[#522D60]">
-          <span className="text-xs">◫</span>
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img src="/appsolve-icon.png" alt="Owl" className="w-4 h-4 object-contain inline-block" />
           <span className="tracking-wider">WAR ROOM // {incident.incident_code}</span>
         </div>
 
@@ -533,7 +534,8 @@ export function IncidentStream({
                     <div className="border-[1.5px] border-[#522D60] bg-[#1A1024] p-3 space-y-2 os-btn-shadow">
                       <div className="flex items-center justify-between border-b border-white/20 pb-1.5">
                         <span className="font-mono text-[10px] font-bold text-[#8DFFA9] flex items-center gap-1.5">
-                          <span>&gt;_</span>
+                          {/* eslint-disable-next-line @next/next/no-img-element */}
+                          <img src="/appsolve-icon.png" alt="Owl" className="w-3.5 h-3.5 object-contain inline-block" />
                           <span>DIAGNOSTIC &amp; TELEMETRY OUTPUT</span>
                         </span>
                         <span className="font-mono text-[9px] text-white/50">PostgreSQL / Redis Engine</span>
@@ -712,8 +714,9 @@ export function IncidentStream({
           }}
           className="flex items-center gap-2 font-mono"
         >
-          <div className="w-6 h-6 shrink-0 bg-[#522D60] text-[#FFFFFF] border border-[#522D60] flex items-center justify-center text-xs font-bold select-none">
-            &gt;_
+          <div className="w-6 h-6 shrink-0 bg-[#522D60] border border-[#522D60] flex items-center justify-center p-0.5 overflow-hidden select-none">
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src="/appsolve-icon.png" alt="Owl" className="w-full h-full object-contain" />
           </div>
 
           <input

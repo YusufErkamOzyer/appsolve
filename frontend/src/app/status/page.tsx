@@ -150,7 +150,8 @@ export default function StatusPage() {
         {/* Navigation & Live Breadcrumb */}
         <div className="flex items-center justify-between font-mono text-[11px] text-[#522D60] border-b-[1.5px] border-[#522D60] pb-2">
           <div className="flex items-center gap-2">
-            <span className="w-2 h-2 bg-[#522D60]" />
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src="/appsolve-icon.png" alt="Owl" className="w-3.5 h-3.5 object-contain inline-block" />
             <span className="font-bold">APPSOLVE.OS1 // PUBLIC STATUS PAGE</span>
             <span className="text-[#80426E]">/status</span>
           </div>

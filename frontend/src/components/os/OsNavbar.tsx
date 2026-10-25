@@ -89,8 +89,9 @@ export function OsNavbar({
       <div className="max-w-[1600px] mx-auto px-3 sm:px-4 py-2 flex flex-wrap items-center justify-between gap-3">
         {/* Left: Brand & Surface Links */}
         <div className="flex items-center gap-3">
-          <div className="w-6 h-6 border border-white/40 bg-white/10 text-[#FFFFFF] flex items-center justify-center font-mono font-bold text-xs select-none">
-            &gt;_
+          <div className="w-6 h-6 border border-white/40 bg-white/10 flex items-center justify-center overflow-hidden select-none p-0.5">
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src="/appsolve-icon.png" alt="Appsolve Owl" className="w-full h-full object-contain" />
           </div>
 
           <div className="flex items-center gap-2 font-mono">

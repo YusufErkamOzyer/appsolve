@@ -19,6 +19,11 @@ const spaceGrotesk = Space_Grotesk({
 export const metadata: Metadata = {
   title: "APPSOLVE.OS1 // SRE Command Workstation",
   description: "Autonomous AI Incident Management & Telemetry Command Center for QuickCart",
+  icons: {
+    icon: "/appsolve-icon.png",
+    shortcut: "/appsolve-icon.png",
+    apple: "/appsolve-icon.png",
+  },
 };
 
 export default function RootLayout({

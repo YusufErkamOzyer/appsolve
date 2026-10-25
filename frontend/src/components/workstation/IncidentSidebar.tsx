@@ -68,7 +68,8 @@ export function IncidentSidebar({
       {/* 1. Header Bar */}
       <div className="h-9 px-3 border-b-[1.5px] border-[#522D60] bg-[#FFFFFF] flex items-center justify-between font-mono text-[11px]">
         <div className="flex items-center gap-2 font-bold text-[#522D60]">
-          <span className="text-xs">☰</span>
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img src="/appsolve-icon.png" alt="Queue Icon" className="w-3.5 h-3.5 object-contain inline-block" />
           <span className="tracking-wider">OLAY KUYRUĞU</span>
         </div>
         <span className="px-1.5 py-0.2 bg-[#FAF6F2] border border-[#522D60] font-bold text-[#522D60] text-[10px]">

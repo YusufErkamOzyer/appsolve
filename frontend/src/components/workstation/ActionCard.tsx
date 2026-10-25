@@ -374,7 +374,8 @@ export function ActionCard({
               <div className="border-[1.5px] border-[#522D60] bg-[#1A1024] p-3 space-y-2.5 font-mono text-[10px] os-window-shadow-sm">
                 <div className="flex items-center justify-between border-b border-white/15 pb-1.5 text-[9px]">
                   <div className="flex items-center gap-2 text-[#8DFFA9]">
-                    <span className="font-bold">&gt;_</span>
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img src="/appsolve-icon.png" alt="Owl" className="w-3.5 h-3.5 object-contain inline-block" />
                     <span>POSTGRESQL LOCK REGISTRY &amp; SRE BRIDGE FEED</span>
                   </div>
                   <div className="flex items-center gap-1.5 text-white/60">

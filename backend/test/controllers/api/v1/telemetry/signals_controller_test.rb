@@ -132,4 +132,36 @@ class Api::V1::Telemetry::SignalsControllerTest < ActionDispatch::IntegrationTes
     assert_equal "jev_categorizing", inc_data["ai_stage"]
     assert_includes inc_data["ai_status_text"], "TypeSafe Jev"
   end
+
+  test "POST /api/v1/telemetry/signals deduplicates repeated signals for the same active error" do
+    payload = {
+      service_slug: "cart",
+      error_code: "ERR_COUPON_DUPLICATE_CHECK",
+      message: "Cart coupon calculation failed on tax multiplier",
+      raw_payload: {
+        error_code: "ERR_COUPON_DUPLICATE_CHECK",
+        line: 42
+      }
+    }
+
+    # 1. İlk sinyal: yeni olay açılmalı
+    assert_difference("Incident.count", 1) do
+      post api_v1_telemetry_signals_url, params: payload, as: :json
+    end
+    assert_response :created
+    first_json = JSON.parse(response.body)
+    first_code = first_json.dig("incident", "incident_code")
+    assert_not_nil first_code
+    assert_nil first_json["deduplicated"]
+
+    # 2. İkinci sinyal (aynı hata kodu ve servis): mükerrer olay AÇILMAMALI
+    assert_no_difference("Incident.count") do
+      post api_v1_telemetry_signals_url, params: payload, as: :json
+    end
+    assert_response :created
+    second_json = JSON.parse(response.body)
+    assert_equal true, second_json["deduplicated"]
+    assert_includes second_json["message"], "Mükerrer olay açılması engellendi"
+    assert_equal first_code, second_json.dig("incident", "incident_code")
+  end
 end
