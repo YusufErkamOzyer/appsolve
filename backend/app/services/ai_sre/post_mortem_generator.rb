@@ -33,6 +33,8 @@ module AiSre
         "Kök neden tekrarını önleyici mimari dayanıklılık testleri planla"
       ]
 
+      used_model = ai_result[:used_model] || "gemini-3.8-flash"
+
       pm = @incident.post_mortem || @incident.build_post_mortem
       pm.assign_attributes(
         summary: ai_result[:summary],
@@ -41,7 +43,7 @@ module AiSre
         mttr_formatted: mttr_formatted,
         affected_services: affected,
         action_items: action_items,
-        generated_by: "@solver (AI SRE Ajanı)"
+        generated_by: "@solver (#{used_model})"
       )
       pm.save!
 
@@ -50,7 +52,7 @@ module AiSre
         event_type: "post_mortem_generated",
         actor: "@solver",
         title: "Otomatik Post-Mortem Raporu Yayınlandı (PostMortem 1.1)",
-        details: "Kök neden analizi, MTTR (#{mttr_formatted}) ve #{action_items.size} önleyici aksiyon maddesi içeren resmi rapor hazırlandı.",
+        details: "Kök neden analizi, MTTR (#{mttr_formatted}) ve #{action_items.size} önleyici aksiyon maddesi içeren resmi rapor #{used_model} ile hazırlandı.",
         occurred_at: Time.current
       )
 

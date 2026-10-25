@@ -113,4 +113,23 @@ class Api::V1::Telemetry::SignalsControllerTest < ActionDispatch::IntegrationTes
     # Re-enable AI
     AiSre::AutomationConfig.ai_connected = true
   end
+
+  test "POST /api/v1/telemetry/signals with staged: true initializes uncategorized incident with jev_categorizing stage" do
+    payload = {
+      service_slug: "checkout",
+      error_code: "HTTP_504_DB_LOCK",
+      message: "Payment gateway threads locked.",
+      staged: true
+    }
+
+    post api_v1_telemetry_signals_url, params: payload, as: :json
+    assert_response :created
+    json = JSON.parse(response.body)
+    inc_data = json["incident"]
+
+    assert_equal "accepted", json["status"]
+    assert_includes json["message"], "aşamalı AI triyaj"
+    assert_equal "jev_categorizing", inc_data["ai_stage"]
+    assert_includes inc_data["ai_status_text"], "TypeSafe Jev"
+  end
 end

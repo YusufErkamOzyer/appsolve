@@ -6,6 +6,7 @@ import { Incident, sendWarRoomMessage } from "@/lib/api";
 import { SlaCountdown } from "./SlaCountdown";
 import { ActionCard } from "./ActionCard";
 import { PostMortemViewer } from "./PostMortemViewer";
+import { RetroThinkingOrb } from "./RetroThinkingOrb";
 
 interface IncidentStreamProps {
   incident: Incident | null;
@@ -90,6 +91,16 @@ export function IncidentStream({
   const rawPayload = incident.raw_payload || {};
   const metrics = (rawPayload.metrics as Record<string, unknown>) || {};
 
+  const aiStage = incident.ai_stage;
+  const aiStatusText = incident.ai_status_text;
+  const isJevCategorizing = !incident.severity || aiStage === "jev_categorizing";
+  const jevDecision = (incident.jev_triage || (rawPayload.jev_triage as Record<string, unknown> | undefined)) as Record<string, any> | undefined;
+  const hasJevDecision = Boolean(
+    jevDecision ||
+    (incident.events && incident.events.some((e) => e.event_type === "jev_categorization_completed"))
+  );
+  const hasAiTriage = Boolean(incident.hypothesis || incident.reasoning);
+
   const createdDate = new Date(incident.created_at);
   const timeStr = createdDate.toLocaleTimeString();
 
@@ -148,6 +159,11 @@ export function IncidentStream({
             <span className="inline-flex items-center gap-1 font-bold text-[#1E8E5A] px-2 py-0.5 bg-[#EEFBF3] border border-[#1E8E5A]">
               <span className="w-1.5 h-1.5 rounded-full bg-[#1E8E5A]" />
               ÇÖZÜLDÜ
+            </span>
+          ) : isJevCategorizing ? (
+            <span className="inline-flex items-center gap-1 font-bold text-[#522D60] px-2 py-0.5 bg-[#FFD38B] border border-[#522D60] animate-pulse">
+              <span className="w-2 h-2 rounded-full bg-[#522D60]" />
+              ⏳ JEV İNCELİYOR
             </span>
           ) : (
             <span
@@ -269,7 +285,11 @@ export function IncidentStream({
                     {String(rawPayload.error_code || incident.title)}
                   </h3>
                 </div>
-                {incident.severity && (
+                {isJevCategorizing ? (
+                  <span className="px-1.5 py-0.2 font-mono text-[9px] font-bold border border-[#522D60] bg-[#FFD38B] text-[#522D60] animate-pulse">
+                    ⏳ HENÜZ KATEGORİZE EDİLMEDİ
+                  </span>
+                ) : incident.severity ? (
                   <span
                     className={`px-1.5 py-0.2 font-mono text-[9px] font-bold border border-[#522D60] ${
                       isSev1
@@ -281,7 +301,7 @@ export function IncidentStream({
                   >
                     {incident.severity}
                   </span>
-                )}
+                ) : null}
               </div>
 
               {/* Telemetry Key-Value Strip */}
@@ -322,93 +342,205 @@ export function IncidentStream({
             </div>
           </div>
 
-          {/* Card 2: AI TRIAGE & HYPOTHESIS (Soft Lavender Tint) */}
-          <div className="relative space-y-1.5">
-            <div className="flex items-center gap-2 font-mono text-[10px] -ml-6 sm:-ml-8">
-              <span className="w-4 h-4 rounded-full bg-[#FFFFFF] border-2 border-[#522D60] flex items-center justify-center shrink-0 z-10">
-                <span className="w-1.5 h-1.5 bg-[#522D60] rounded-full" />
-              </span>
-              <span className="font-bold text-[#80426E] tabular-nums">{timeStr}</span>
-              <span className="px-1.5 py-0.2 bg-[#F6F5FA] border border-[#522D60] text-[#522D60] font-bold tracking-wider">
-                @SOLVER AI SRE AJANI
-              </span>
+          {/* Card 1A: RETRO ORB (Hata İnceleniyor & Jev Kategorizasyonu Devrede) */}
+          {isJevCategorizing && (
+            <div className="relative space-y-1.5">
+              <div className="flex items-center gap-2 font-mono text-[10px] -ml-6 sm:-ml-8">
+                <span className="w-4 h-4 rounded-full bg-[#FFFFFF] border-2 border-[#F2A67B] flex items-center justify-center shrink-0 z-10">
+                  <span className="w-1.5 h-1.5 bg-[#F2A67B] rounded-full animate-ping" />
+                </span>
+                <span className="font-bold text-[#80426E] tabular-nums">{timeStr}</span>
+                <span className="px-1.5 py-0.2 bg-[#FAF6F2] border border-[#522D60] text-[#522D60] font-bold tracking-wider">
+                  TYPESAFE JEV ANALİZİ
+                </span>
+              </div>
+              <RetroThinkingOrb
+                stageLabel="TYPESAFE JEV // SYSTEM ONE"
+                statusText={aiStatusText || "Hata inceleniyor — TypeSafe Jev (System One) ile kategorize ediliyor..."}
+              />
             </div>
+          )}
 
-            <div className="border-[1.5px] border-[#522D60]/30 bg-[#F6F5FA] p-3 space-y-2.5 os-btn-shadow-sm">
-              <div className="flex items-start justify-between gap-2 border-b border-[#522D60]/15 pb-1.5">
-                <div className="flex items-center gap-1.5">
-                  <span className="text-[#522D60] text-sm">✦</span>
-                  <span className="font-mono font-bold text-xs text-[#522D60]">
-                    {incident.severity} Belirlendi. Kök Neden: {incident.hypothesis?.slice(0, 60)}...
-                  </span>
-                </div>
-                <span className="px-1.5 py-0.2 bg-[#522D60] text-[#FFFFFF] font-mono text-[9px] font-bold border border-[#522D60]">
-                  AI TRIAGE
+          {/* Card 1B: TYPESAFE JEV KATEGORİZASYON KARARI */}
+          {hasJevDecision && (
+            <div className="relative space-y-1.5">
+              <div className="flex items-center gap-2 font-mono text-[10px] -ml-6 sm:-ml-8">
+                <span className="w-4 h-4 rounded-full bg-[#FFFFFF] border-2 border-[#80426E] flex items-center justify-center shrink-0 z-10">
+                  <span className="w-1.5 h-1.5 bg-[#80426E] rounded-full" />
+                </span>
+                <span className="font-bold text-[#80426E] tabular-nums">{timeStr}</span>
+                <span className="px-1.5 py-0.2 bg-[#FAF6F2] border border-[#80426E] text-[#80426E] font-bold tracking-wider">
+                  TYPESAFE JEV (SYSTEM ONE) KARARI
                 </span>
               </div>
 
-              {incident.reasoning && (
-                <div className="space-y-0.5">
-                  <div className="font-mono text-[9px] font-bold text-[#80426E] uppercase">
-                    İŞ ETKİSİ VE SEV GEREKÇESİ:
+              <div className="border-[1.5px] border-[#80426E]/40 bg-[#FFFFFF] p-3 space-y-2 os-btn-shadow-sm">
+                <div className="flex items-center justify-between border-b border-[#522D60]/15 pb-1.5">
+                  <div className="flex items-center gap-2">
+                    <span className="text-sm text-[#80426E]">✦</span>
+                    <span className="font-mono font-bold text-xs text-[#522D60]">
+                      Kategori: <strong>{String(jevDecision?.category || "Sınıflandırıldı")}</strong>
+                    </span>
                   </div>
-                  <p className="font-sans text-[12px] text-[#522D60] leading-relaxed">
-                    {incident.reasoning}
-                  </p>
+                  <span
+                    className={`px-1.5 py-0.2 font-mono text-[9px] font-bold border border-[#522D60] ${
+                      isSev1
+                        ? "bg-[#D9383A] text-[#FFFFFF]"
+                        : isSev2
+                        ? "bg-[#F2A67B] text-[#522D60]"
+                        : "bg-[#FFD38B] text-[#522D60]"
+                    }`}
+                  >
+                    DERECE: {incident.severity || "SEV-2"}
+                  </span>
                 </div>
-              )}
 
-              {incident.hypothesis && (
-                <div className="space-y-0.5 bg-[#FFFFFF] p-2 border border-[#522D60]/20">
-                  <div className="font-mono text-[9px] font-bold text-[#522D60] uppercase">
-                    KÖK NEDEN TAHMİNİ (ROOT CAUSE HYPOTHESIS):
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 font-mono text-[10px] text-[#522D60] bg-[#FAF6F2] p-2 border border-[#522D60]/20">
+                  <div>
+                    <span className="text-[8px] text-[#80426E] block uppercase">Model:</span>
+                    <strong className="text-[#522D60] truncate block">{String(jevDecision?.model || "jev-latest")}</strong>
                   </div>
-                  <p className="font-sans text-[12px] font-semibold text-[#522D60] leading-relaxed">
-                    {incident.hypothesis}
-                  </p>
+                  <div>
+                    <span className="text-[8px] text-[#80426E] block uppercase">Güven (Confidence):</span>
+                    <strong className="text-[#1E8E5A]">
+                      {jevDecision?.confidence ? `%${(Number(jevDecision.confidence) * 100).toFixed(1)}` : "%98.0"}
+                    </strong>
+                  </div>
+                  <div>
+                    <span className="text-[8px] text-[#80426E] block uppercase">Müdahale Aracı:</span>
+                    <strong className="text-[#522D60] truncate block">{String(jevDecision?.tool_name || "kill_db_locks")}</strong>
+                  </div>
+                  <div>
+                    <span className="text-[8px] text-[#80426E] block uppercase">Risk Seviyesi:</span>
+                    <strong className={incident.severity === "SEV-1" ? "text-[#D9383A]" : "text-[#F2A67B]"}>
+                      {String(jevDecision?.risk_level || (isSev1 ? "high" : "medium")).toUpperCase()}
+                    </strong>
+                  </div>
                 </div>
-              )}
+              </div>
             </div>
-          </div>
+          )}
+
+          {/* Card 2: AI TRIAGE & HYPOTHESIS (Soft Lavender Tint) */}
+          {hasAiTriage && (
+            <div className="relative space-y-1.5">
+              <div className="flex items-center gap-2 font-mono text-[10px] -ml-6 sm:-ml-8">
+                <span className="w-4 h-4 rounded-full bg-[#FFFFFF] border-2 border-[#522D60] flex items-center justify-center shrink-0 z-10">
+                  <span className="w-1.5 h-1.5 bg-[#522D60] rounded-full" />
+                </span>
+                <span className="font-bold text-[#80426E] tabular-nums">{timeStr}</span>
+                <span className="px-1.5 py-0.2 bg-[#F6F5FA] border border-[#522D60] text-[#522D60] font-bold tracking-wider">
+                  @SOLVER AI SRE AJANI
+                </span>
+              </div>
+
+              <div className="border-[1.5px] border-[#522D60]/30 bg-[#F6F5FA] p-3 space-y-2.5 os-btn-shadow-sm">
+                <div className="flex items-start justify-between gap-2 border-b border-[#522D60]/15 pb-1.5">
+                  <div className="flex items-center gap-1.5">
+                    <span className="text-[#522D60] text-sm">✦</span>
+                    <span className="font-mono font-bold text-xs text-[#522D60]">
+                      {incident.severity} Belirlendi. Kök Neden: {incident.hypothesis?.slice(0, 60)}...
+                    </span>
+                  </div>
+                  <span className="px-1.5 py-0.2 bg-[#522D60] text-[#FFFFFF] font-mono text-[9px] font-bold border border-[#522D60]">
+                    AI TRIAGE
+                  </span>
+                </div>
+
+                {incident.reasoning && (
+                  <div className="space-y-0.5">
+                    <div className="font-mono text-[9px] font-bold text-[#80426E] uppercase">
+                      İŞ ETKİSİ VE SEV GEREKÇESİ:
+                    </div>
+                    <p className="font-sans text-[12px] text-[#522D60] leading-relaxed">
+                      {incident.reasoning}
+                    </p>
+                  </div>
+                )}
+
+                {incident.hypothesis && (
+                  <div className="space-y-0.5 bg-[#FFFFFF] p-2 border border-[#522D60]/20">
+                    <div className="font-mono text-[9px] font-bold text-[#522D60] uppercase">
+                      KÖK NEDEN TAHMİNİ (ROOT CAUSE HYPOTHESIS):
+                    </div>
+                    <p className="font-sans text-[12px] font-semibold text-[#522D60] leading-relaxed">
+                      {incident.hypothesis}
+                    </p>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
 
           {/* Card 3: SECURITY GUARDRAIL (Warm Amber Tint) */}
-          <div className="relative space-y-1.5">
-            <div className="flex items-center gap-2 font-mono text-[10px] -ml-6 sm:-ml-8">
-              <span className="w-4 h-4 rounded-full bg-[#FFFFFF] border-2 border-[#E6B86A] flex items-center justify-center shrink-0 z-10">
-                <span className="w-1.5 h-1.5 bg-[#E6B86A] rounded-full" />
-              </span>
-              <span className="font-bold text-[#80426E] tabular-nums">{timeStr}</span>
-              <span className="px-1.5 py-0.2 bg-[#FFF8E7] border border-[#522D60] text-[#522D60] font-bold tracking-wider">
-                GÜVENLİK KİLİDİ
-              </span>
-            </div>
-
-            <div className="border-[1.5px] border-[#E6B86A] bg-[#FFF8E7] p-3 space-y-1.5 os-btn-shadow-sm">
-              <div className="flex items-start justify-between gap-2">
-                <div className="flex items-center gap-2 font-mono font-bold text-xs text-[#522D60]">
-                  <span>🔒</span>
-                  <span>
-                    {incident.autonomy_mode === "manual_command_only"
-                      ? "Tam Güvenlik Kilidi Devrede (Manual Approval Lock Engaged)"
-                      : incident.autonomy_mode === "approval_required"
-                      ? "İnsan Onayı Kilidi Devrede (Human Approval Required)"
-                      : "Tam Otonom Yetki Açık (Full Autonomy)"}
-                  </span>
-                </div>
-                <span className="px-1.5 py-0.2 bg-[#FFD38B] text-[#522D60] font-mono text-[9px] font-bold border border-[#522D60]">
-                  GUARDRAIL
+          {incident.autonomy_mode !== "pending_triage" && incident.severity && (
+            <div className="relative space-y-1.5">
+              <div className="flex items-center gap-2 font-mono text-[10px] -ml-6 sm:-ml-8">
+                <span className="w-4 h-4 rounded-full bg-[#FFFFFF] border-2 border-[#E6B86A] flex items-center justify-center shrink-0 z-10">
+                  <span className="w-1.5 h-1.5 bg-[#E6B86A] rounded-full" />
+                </span>
+                <span className="font-bold text-[#80426E] tabular-nums">{timeStr}</span>
+                <span className="px-1.5 py-0.2 bg-[#FFF8E7] border border-[#522D60] text-[#522D60] font-bold tracking-wider">
+                  GÜVENLİK KİLİDİ
                 </span>
               </div>
 
-              <p className="font-sans text-[11px] text-[#522D60]/90 leading-relaxed">
-                {incident.autonomy_mode === "manual_command_only"
-                  ? "Kritik SEV-1 krizi nedeniyle izinsiz otonom müdahale kilitlendi. @solver tarafından sunulan implementasyon planları nöbetçi mühendisin tek tıkla onayıyla veya sohbet yönergeleriyle icra edilir."
-                  : incident.autonomy_mode === "approval_required"
-                  ? "Önemli işlev bozulması nedeniyle doğrudan müdahale kilitlendi. Nöbetçi Mühendisin eylem kartını onaylaması bekleniyor."
-                  : "Düşük riskli operasyon. Ajan insan onayı beklemeksizin müdahaleyi tam otonom icra etme yetkisine sahiptir."}
-              </p>
+              <div className="border-[1.5px] border-[#E6B86A] bg-[#FFF8E7] p-3 space-y-1.5 os-btn-shadow-sm">
+                <div className="flex items-start justify-between gap-2">
+                  <div className="flex items-center gap-2 font-mono font-bold text-xs text-[#522D60]">
+                    <span>🔒</span>
+                    <span>
+                      {incident.autonomy_mode === "manual_command_only"
+                        ? "Tam Güvenlik Kilidi Devrede (Manual Approval Lock Engaged)"
+                        : incident.autonomy_mode === "approval_required"
+                        ? "İnsan Onayı Kilidi Devrede (Human Approval Required)"
+                        : "Tam Otonom Yetki Açık (Full Autonomy)"}
+                    </span>
+                  </div>
+                  <span className="px-1.5 py-0.2 bg-[#FFD38B] text-[#522D60] font-mono text-[9px] font-bold border border-[#522D60]">
+                    GUARDRAIL
+                  </span>
+                </div>
+
+                <p className="font-sans text-[11px] text-[#522D60]/90 leading-relaxed">
+                  {incident.autonomy_mode === "manual_command_only"
+                    ? "Kritik SEV-1 krizi nedeniyle izinsiz otonom müdahale kilitlendi. @solver tarafından sunulan implementasyon planları nöbetçi mühendisin tek tıkla onayıyla veya sohbet yönergeleriyle icra edilir."
+                    : incident.autonomy_mode === "approval_required"
+                    ? "Önemli işlev bozulması nedeniyle doğrudan müdahale kilitlendi. Nöbetçi Mühendisin eylem kartını onaylaması bekleniyor."
+                    : "Düşük riskli operasyon. Ajan insan onayı beklemeksizin müdahaleyi tam otonom icra etme yetkisine sahiptir."}
+                </p>
+              </div>
             </div>
-          </div>
+          )}
+
+          {/* Card 3A: RETRO ORB (AI Plan Çıkarımı / Kod Onarımı / Kilit Taraması / Otonom Çözüm) */}
+          {aiStage && ["ai_analyzing", "ai_autonomous_solving", "ai_preparing_patch", "ai_inspecting_locks", "ai_executing_plan"].includes(aiStage) && (
+            <div className="relative space-y-1.5">
+              <div className="flex items-center gap-2 font-mono text-[10px] -ml-6 sm:-ml-8">
+                <span className="w-4 h-4 rounded-full bg-[#FFFFFF] border-2 border-[#522D60] flex items-center justify-center shrink-0 z-10">
+                  <span className="w-1.5 h-1.5 bg-[#522D60] rounded-full animate-ping" />
+                </span>
+                <span className="font-bold text-[#80426E] tabular-nums">{timeStr}</span>
+                <span className="px-1.5 py-0.2 bg-[#FAF6F2] border border-[#522D60] text-[#522D60] font-bold tracking-wider">
+                  @SOLVER AI İŞLEMİ
+                </span>
+              </div>
+              <RetroThinkingOrb
+                stageLabel={
+                  aiStage === "ai_autonomous_solving"
+                    ? "@SOLVER OTONOM MÜDAHALE MOTORU"
+                    : aiStage === "ai_preparing_patch"
+                    ? "@SOLVER KOD ONARIM MOTORU (DIFF & PR)"
+                    : aiStage === "ai_inspecting_locks"
+                    ? "@SOLVER VERİTABANI KİLİT TARAMASI"
+                    : aiStage === "ai_executing_plan"
+                    ? "@SOLVER İMPLEMENTASYON İCRASI"
+                    : "@SOLVER KÖK NEDEN & PLAN ÇIKARIMI"
+                }
+                statusText={aiStatusText || "Yapay zeka analiz ve kurtarma prosedürünü yürütüyor..."}
+              />
+            </div>
+          )}
 
           {/* 3. WAR ROOM COLLABORATIVE FEED (Messages, Plans & Diagnostics) */}
           {warRoomMessages.length > 0 ? (
@@ -562,8 +694,32 @@ export function IncidentStream({
             </div>
           )}
 
-          {/* Embedded Post-Mortem Document in Stream View */}
-          {isResolved && (
+          {/* Post-Mortem Writing In Progress Orb (Gemini Flash 3.8 / 3.6) */}
+          {isResolved && (!incident.post_mortem || aiStage === "writing_post_mortem") && (
+            <div className="relative space-y-1.5">
+              <div className="flex items-center gap-2 font-mono text-[10px] -ml-6 sm:-ml-8">
+                <span className="w-4 h-4 rounded-full bg-[#FFFFFF] border-2 border-[#522D60] flex items-center justify-center shrink-0 z-10">
+                  <span className="w-1.5 h-1.5 bg-[#522D60] rounded-full animate-ping" />
+                </span>
+                <span className="font-bold text-[#80426E] tabular-nums">
+                  {incident.resolved_at ? new Date(incident.resolved_at).toLocaleTimeString() : timeStr}
+                </span>
+                <span className="px-1.5 py-0.2 bg-[#FAF6F2] border border-[#522D60] text-[#522D60] font-bold tracking-wider">
+                  GEMINI FLASH 3.8 / 3.6 RAPORLAMA
+                </span>
+              </div>
+              <RetroThinkingOrb
+                stageLabel="GEMINI FLASH 3.8 / 3.6 RAPORLAMA"
+                statusText={
+                  aiStatusText ||
+                  "Hata çözüldü — Gemini Flash (3.8 / 3.6 kota duyarlı) ile Post-Mortem raporu yazılıyor..."
+                }
+              />
+            </div>
+          )}
+
+          {/* Embedded Post-Mortem Document in Stream View once generated */}
+          {isResolved && incident.post_mortem && (
             <div className="relative space-y-2 pt-2">
               <div className="flex items-center gap-2 font-mono text-[10px] -ml-6 sm:-ml-8">
                 <span className="w-4 h-4 rounded-full bg-[#FFFFFF] border-2 border-[#522D60] flex items-center justify-center shrink-0 z-10">

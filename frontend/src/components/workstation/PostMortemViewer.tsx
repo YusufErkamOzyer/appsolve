@@ -2,6 +2,7 @@
 
 import React, { useState } from "react";
 import { Incident, PostMortem, regeneratePostMortem, getPostMortemExportUrl } from "@/lib/api";
+import { RetroThinkingOrb } from "./RetroThinkingOrb";
 
 interface PostMortemViewerProps {
   incident: Incident | null;
@@ -30,37 +31,35 @@ export function PostMortemViewer({
   const isResolved = incident.status === "resolved";
   const postMortem: PostMortem | null = incident.post_mortem || null;
 
-  // Pending State: Incident is active and not resolved yet
+  // Pending State: Incident is active and not resolved yet, or report is being generated
   if (!isResolved || !postMortem) {
     return (
-      <div className="border-[1.5px] border-[#522D60] bg-[#FFFFFF] os-window-shadow overflow-hidden">
+      <div className="border-[1.5px] border-[#522D60] bg-[#FFFFFF] os-window-shadow overflow-hidden p-4 space-y-4">
         {/* Header */}
-        <div className="h-8 px-3 border-b-[1.5px] border-[#522D60] bg-[#FAF6F2] flex items-center justify-between font-mono text-[11px]">
+        <div className="h-8 px-3 border-b-[1.5px] border-[#522D60] bg-[#FAF6F2] -mx-4 -mt-4 flex items-center justify-between font-mono text-[11px]">
           <div className="flex items-center gap-2 font-bold text-[#522D60]">
             <span>📄</span>
             <span>POST_MORTEM_VIEWER 1.1 // {incident.incident_code}</span>
           </div>
-          <span className="px-2 py-0.5 bg-[#FFD38B] text-[#522D60] border border-[#522D60] font-bold text-[9px]">
-            ⏳ BEKLEMEDE (OLAY AKTİF)
+          <span className="px-2 py-0.5 bg-[#FFD38B] text-[#522D60] border border-[#522D60] font-bold text-[9px] animate-pulse">
+            {isResolved ? "⏳ RAPOR YAZILIYOR" : "⏳ BEKLEMEDE (OLAY AKTİF)"}
           </span>
         </div>
 
-        {/* Pending Body */}
-        <div className="p-6 text-center space-y-3 bg-[#FAF6F2]/40">
-          <div className="inline-flex items-center justify-center w-10 h-10 rounded-full border-2 border-[#522D60] bg-[#FFFFFF] text-lg">
-            ⏱
-          </div>
-          <div className="font-mono text-xs font-bold text-[#522D60]">
-            OTOMATİK POST-MORTEM BEKLENİYOR
-          </div>
-          <p className="text-[12px] font-sans text-[#80426E] max-w-md mx-auto leading-relaxed">
-            Bu olay henüz çözümlenmedi. Kriz <strong>{incident.severity}</strong> seviyesinde inceleniyor. Olay kapatıldığı anda (@solver otonom çözümü, eylem kartı onayı veya War Room kapanışı ile) Gemini AI tüm zaman çizelgesini ve aksiyonları sentezleyerek resmi Post-Mortem raporunu bu ekranda otomatik oluşturacaktır.
-          </p>
-          <div className="inline-flex items-center gap-2 px-3 py-1 bg-[#FFFFFF] border border-[#522D60]/30 font-mono text-[10px] text-[#522D60]">
-            <span>Hedef Servis: <strong>{incident.service?.name}</strong></span>
-            <span>•</span>
-            <span>Durum: <strong className="uppercase">{incident.status}</strong></span>
-          </div>
+        {/* Retro Thinking Orb during report generation or investigation */}
+        <RetroThinkingOrb
+          statusText={
+            isResolved
+              ? "Hata çözüldü — Gemini Flash (3.8 / 3.6 kota duyarlı) ile Post-Mortem raporu yazılıyor..."
+              : incident.ai_status_text || `Olay ${incident.severity || "inceleniyor"}. Çözüldüğü anda otomatik Post-Mortem raporu sentezlenecektir.`
+          }
+          stageLabel={isResolved ? "GEMINI FLASH RAPORLAMA MOTORU" : "AI SRE KRİZ ODASI"}
+        />
+
+        <div className="text-center font-mono text-[11px] text-[#80426E]">
+          <span>Hedef Servis: <strong className="text-[#522D60]">{incident.service?.name}</strong></span>
+          <span className="mx-2">•</span>
+          <span>Durum: <strong className="uppercase text-[#522D60]">{incident.status}</strong></span>
         </div>
       </div>
     );
@@ -348,7 +347,7 @@ ${actionsList}
                 {postMortem.generated_by}
               </strong>
               <span className="text-[10px] text-[#80426E]">
-                Gemini 2.5 Flash Engine
+                Gemini Flash (3.8 / 3.6)
               </span>
             </div>
           </div>
@@ -446,7 +445,7 @@ ${actionsList}
         {/* Section 5: Blameless SRE Stamp */}
         <div className="pt-2 border-t border-[#522D60]/15 flex items-center justify-between font-mono text-[10px] text-[#80426E]">
           <span>Appsolve OS1 // Blameless Post-Mortem Standardı</span>
-          <span>Google Gemini 2.5 Flash AI Engine</span>
+          <span>Google Gemini Flash Engine (3.8 / 3.6 Kota Duyarlı)</span>
         </div>
       </div>
     </div>

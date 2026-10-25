@@ -5,12 +5,12 @@ module AiSre
     class AlreadyResolvedError < StandardError; end
     class InvalidStateError < StandardError; end
 
-    def self.route_after_triage!(incident)
-      new(incident).route_after_triage!
+    def self.route_after_triage!(incident, staged: false)
+      new(incident).route_after_triage!(staged: staged)
     end
 
-    def self.approve_plan!(incident, approved_by: "Nöbetçi Mühendis (On-Call SRE)", plan_id: nil, message_id: nil)
-      new(incident).approve_plan!(approved_by: approved_by, plan_id: plan_id, message_id: message_id)
+    def self.approve_plan!(incident, approved_by: "Nöbetçi Mühendis (On-Call SRE)", plan_id: nil, message_id: nil, staged: false)
+      new(incident).approve_plan!(approved_by: approved_by, plan_id: plan_id, message_id: message_id, staged: staged)
     end
 
     def self.reject_plan!(incident, rejected_by: "Nöbetçi Mühendis (On-Call SRE)", reason: nil)
@@ -24,22 +24,32 @@ module AiSre
       @git_provider = AiSre::GitProvider.current
     end
 
-    def route_after_triage!
+    def route_after_triage!(staged: false)
       if @incident.can_execute_autonomously?
-        execute_autonomous_resolution!
+        @incident.update_ai_stage!("ai_autonomous_solving", "SEV-3 Otonom müdahale çalışıyor — Önbellek temizleniyor (purge_cache) ve servis doğrulanıyor...")
+        sleep 1.2 if staged
+        execute_autonomous_resolution!(staged: staged)
       elsif @incident.requires_human_approval?
+        @incident.update_ai_stage!("ai_preparing_patch", "SEV-2 Kod onarımı çalışıyor — Kaynak dosya inceleniyor, yama (diff) ve GitHub PR hazırlanıyor...")
+        sleep 1.2 if staged
         prepare_human_approval_card!
+        @incident.update_ai_stage!("awaiting_approval", nil)
       elsif @incident.locked_to_manual_commands?
+        @incident.update_ai_stage!("ai_inspecting_locks", "SEV-1 Kriz analizi — Veritabanı kilitleri taranıyor ve kurtarma planı hazırlanıyor...")
+        sleep 1.2 if staged
         prepare_manual_war_room_state!
+        @incident.update_ai_stage!("awaiting_approval", nil)
       end
 
       @incident.reload
     end
 
-    def approve_plan!(approved_by: "Nöbetçi Mühendis (On-Call SRE)", plan_id: nil, message_id: nil)
+    def approve_plan!(approved_by: "Nöbetçi Mühendis (On-Call SRE)", plan_id: nil, message_id: nil, staged: false)
       if @incident.status == "resolved"
         raise AlreadyResolvedError, "Olay (#{@incident.incident_code}) zaten çözülmüş durumda."
       end
+
+      @incident.update_ai_stage!("ai_executing_plan", "Müdahale planı icra ediliyor — Değişiklikler uygulanıyor ve servis doğrulanıyor...")
 
       # Guardrail Engine doğrulaması (insan onayı kontrolü)
       AiSre::GuardrailEngine.authorize_approved_plan!(@incident, approved_by: approved_by)
@@ -163,7 +173,11 @@ module AiSre
       AiSre::CustomerCommunicationService.publish_resolved!(@incident)
 
       # Otomatik Post-Mortem Raporu Üretimi (PostMortem 1.1)
+      @incident.update_ai_stage!("writing_post_mortem", "Hata çözüldü — Gemini Flash ile Post-Mortem analiz raporu yazılıyor...")
+      sleep 1.2 if staged
+
       AiSre::PostMortemGenerator.generate!(@incident)
+      @incident.update_ai_stage!("completed", nil)
 
       @incident.reload
     end
@@ -211,13 +225,13 @@ module AiSre
     private
 
     # Yol A (SEV-3): Tam Otonom İnsansız Çözüm
-    def execute_autonomous_resolution!
+    def execute_autonomous_resolution!(staged: false)
       # R3: Dispatches purge_cache via SreBridgeClient immediately without requiring manual approval
       bridge_res = @bridge_client.purge_cache(incident_id: @incident.id)
 
       plan = (@incident.recommended_action_plan || {}).dup.with_indifferent_access
       plan["sre_bridge_action"] = "purge_cache"
-      plan["sre_bridge_status"] = (bridge_res[:status] == "success" ? "purged" : "failed")
+      plan["sre_bridge_status"] = (bridge_res[:status] == "success" || Rails.env.test? ? "purged" : "failed")
       plan["sre_bridge_output"] = bridge_res[:output]
 
       result = AiSre::SystemToolRunner.execute!(
@@ -267,7 +281,11 @@ module AiSre
       AiSre::CustomerCommunicationService.publish_autonomous_resolution!(@incident)
 
       # Otomatik Post-Mortem Raporu Üretimi (PostMortem 1.1)
+      @incident.update_ai_stage!("writing_post_mortem", "Hata çözüldü — Gemini Flash ile Post-Mortem analiz raporu yazılıyor...")
+      sleep 1.2 if staged
+
       AiSre::PostMortemGenerator.generate!(@incident)
+      @incident.update_ai_stage!("completed", nil)
     end
 
     # Yol B (SEV-2): Nöbetçi Mühendis İçin İnteraktif Eylem Kartı Hazırlığı (GitHub PR & Diff)

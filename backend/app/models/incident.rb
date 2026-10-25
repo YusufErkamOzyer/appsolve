@@ -33,6 +33,22 @@ class Incident < ApplicationRecord
     autonomy_mode == "manual_command_only"
   end
 
+  def ai_stage
+    raw_payload&.dig("ai_stage")
+  end
+
+  def ai_status_text
+    raw_payload&.dig("ai_status_text")
+  end
+
+  def update_ai_stage!(stage, status_text = nil)
+    payload = (raw_payload || {}).dup
+    payload["ai_stage"] = stage
+    payload["ai_status_text"] = status_text if status_text.present?
+    payload.delete("ai_status_text") if status_text == :clear || (status_text.nil? && stage == "completed")
+    update!(raw_payload: payload)
+  end
+
   private
 
   def generate_incident_code

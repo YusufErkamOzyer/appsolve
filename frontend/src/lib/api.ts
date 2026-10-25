@@ -107,6 +107,9 @@ export interface Incident {
   status: IncidentStatus;
   autonomy_mode: AutonomyMode;
   escalation_target: EscalationTarget;
+  ai_stage?: string | null;
+  ai_status_text?: string | null;
+  jev_triage?: Record<string, unknown> | null;
   hypothesis: string | null;
   reasoning: string | null;
   recommended_action_plan?: RecommendedActionPlan | null;

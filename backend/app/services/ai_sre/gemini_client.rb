@@ -5,10 +5,12 @@ require "uri"
 module AiSre
   class GeminiClient
     DEFAULT_MODEL = ENV.fetch("GEMINI_MODEL", "antigravity-preview-latest").freeze
+    POST_MORTEM_MODELS = ["gemini-3.8-flash", "gemini-3.6-flash"].freeze
     BASE_URL = "https://generativelanguage.googleapis.com/v1beta/models".freeze
     INTERACTIONS_URL = "https://generativelanguage.googleapis.com/v1beta/interactions".freeze
 
     @@cached_environment_id = nil
+    @@post_mortem_cooldowns = {}
 
     SYSTEM_INSTRUCTION = <<~PROMPT.strip
       Sen Appsolve platformunun kıdemli AI SRE (Site Reliability Engineering) Ajanısın.
@@ -251,11 +253,11 @@ module AiSre
         begin
           call_gemini_post_mortem_api(incident: incident)
         rescue StandardError => e
-          Rails.logger.warn("[AiSre::GeminiClient] Gemini Post-Mortem API çağrısı başarısız oldu (#{e.message}), deterministik yedek rapora geçiliyor.")
-          fallback_post_mortem(incident: incident)
+          Rails.logger.warn("[AiSre::GeminiClient] Gemini Flash Post-Mortem API çağrısı başarısız oldu (#{e.message}), deterministik yedek rapora geçiliyor.")
+          fallback_post_mortem(incident: incident, used_model: "gemini-3.8-flash")
         end
       else
-        fallback_post_mortem(incident: incident)
+        fallback_post_mortem(incident: incident, used_model: "gemini-3.8-flash")
       end
     end
 
@@ -376,8 +378,9 @@ module AiSre
       stripped
     end
 
-    def call_standard_generate_content_api(system_instruction:, user_prompt:, response_schema:, timeout: 25)
-      url = URI("#{BASE_URL}/#{@model}:generateContent?key=#{@api_key}")
+    def call_standard_generate_content_api(system_instruction:, user_prompt:, response_schema:, timeout: 25, model: nil)
+      target_model = model.presence || @model
+      url = URI("#{BASE_URL}/#{target_model}:generateContent?key=#{@api_key}")
       http = Net::HTTP.new(url.host, url.port)
       http.use_ssl = true
       http.read_timeout = timeout
@@ -665,19 +668,40 @@ module AiSre
         JSON formatında üret.
       PROMPT
 
-      execute_structured_prompt(
-        system_instruction: POST_MORTEM_SYSTEM_INSTRUCTION,
-        user_prompt: prompt,
-        response_schema: POST_MORTEM_RESPONSE_SCHEMA
-      )
+      # Kota uygunluğuna göre gemini-3.8-flash ve gemini-3.6-flash arasında seçim / failover yap
+      candidates = POST_MORTEM_MODELS.sort_by do |m|
+        cooldown = @@post_mortem_cooldowns[m]
+        cooldown && cooldown > Time.current ? cooldown.to_f : 0.0
+      end
+
+      last_error = nil
+      candidates.each do |model_name|
+        begin
+          res = call_standard_generate_content_api(
+            system_instruction: POST_MORTEM_SYSTEM_INSTRUCTION,
+            user_prompt: prompt,
+            response_schema: POST_MORTEM_RESPONSE_SCHEMA,
+            model: model_name,
+            timeout: 35
+          )
+          res[:used_model] = model_name
+          return res
+        rescue StandardError => e
+          last_error = e
+          Rails.logger.warn("[AiSre::GeminiClient] Post-Mortem model '#{model_name}' hata verdi (#{e.message}). Kota soğumasına alınıyor ve yedek modele geçiliyor...")
+          @@post_mortem_cooldowns[model_name] = Time.current + 90.seconds
+        end
+      end
+
+      raise last_error if last_error
     end
 
-    def fallback_post_mortem(incident:)
+    def fallback_post_mortem(incident:, used_model: "gemini-3.8-flash")
       sev = incident.severity.to_s
       slug = incident.service&.slug.to_s.downcase
       created_time = incident.created_at.strftime("%H:%M:%S")
 
-      if sev == "SEV-1" || slug == "checkout"
+      res = if sev == "SEV-1" || slug == "checkout"
         {
           summary: "QuickCart ödeme altyapısında saat #{created_time} itibarıyla ödeme ağ geçidinde kritik kilitlenme (deadlock) meydana gelmiştir. Ödeme servisindeki hata oranı %94'e fırlamış, 48 sipariş işlemi veritabanında askıda kalmış ve mobil müşterilerin ödeme akışı tamamen kesintiye uğramıştır. Nöbetçi mühendis ve Takım Lideri War Room'a dahil edilmiş, kilitli işlemler sonlandırılarak ve bağlantı havuzu sıfırlanarak sistem tamamen operasyonel duruma getirilmiştir.",
           root_cause: "PostgreSQL üzerinde 'payment_records' tablosunda eşzamanlı iki farklı işlem dalının (yeni sipariş provizyonu ile bakiye düşümü) ters sırada satır kilidi (row lock) alması sonucu karşılıklı kilitlenme (deadlock) meydana gelmiştir. idle_in_transaction_session_timeout parametresinin tanımlı olmaması nedeniyle kilitli bağlantılar havuzda asılı kalmış ve yeni gelen tüm isteklere 504 Gateway Timeout yanıtı dönmüştür.",
@@ -688,7 +712,7 @@ module AiSre
             "Ödeme ağ geçidi için 5 saniyeyi aşan isteklerde otomatik circuit-breaker tetiklenmesini sağla.",
             "Veritabanı kilit bekleme sayısı 10'u aştığında PagerDuty SEV-1 acil alarm kuralı oluştur."
           ]
-        }.with_indifferent_access
+        }
       elsif sev == "SEV-2" || slug == "cart"
         {
           summary: "QuickCart sepet modülünde yeni açılan promo_v2 özellik bayrağı (feature flag) nedeniyle kupon hesaplama adımında NaN (Not a Number) hatası oluşmuştur. Etkilenen kullanıcı oranı %28'e ulaşmış, indirim kuponu kullanan müşteriler sipariş tamamlama adımına geçememiştir. Ajan tarafından hazırlanan eylem kartı nöbetçi mühendisin tek tıkla onayıyla uygulanmış, bayrak geri alınarak kupon önbelleği temizlenmiş ve servis ivedilikle normale döndürülmüştür.",
@@ -699,7 +723,7 @@ module AiSre
             "Özellik bayraklarının (feature flag) aşamalı açılışında (canary %5 -> %25 -> %100) otomatik geri alma eşikleri tanımla.",
             "Sepet kupon doğrulama modülü için uçtan uca sentetik e2e test kapsamını %95'e çıkar."
           ]
-        }.with_indifferent_access
+        }
       else
         {
           summary: "Katalog servisinde ürün görsel önbellek (CDN edge cache) doluluğunun %90 eşiğini aşması nedeniyle bazı küçük resimlerin geç yüklenmesi şeklinde minör performans kaybı tespit edilmiştir. Ana satın alma ve oturum akışları kesintisiz çalışmıştır. Appsolve AI SRE Ajanı tam otonom yetkisini kullanarak insan müdahalesi gerekmeksizin önbelleği temizlemiş ve olay otomatik olarak kapatılmıştır.",
@@ -710,8 +734,11 @@ module AiSre
             "Katalog görsel yükleme servisindeki webp/avif otomatik sıkıştırma boru hattını optimize et.",
             "CDN uç nokta bellek kullanım alarm eşiğini %85 seviyesine çek."
           ]
-        }.with_indifferent_access
+        }
       end
+
+      res[:used_model] = used_model
+      res.with_indifferent_access
     end
 
     def call_gemini_customer_status_api(incident:, phase:)

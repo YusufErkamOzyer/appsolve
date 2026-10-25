@@ -73,7 +73,9 @@ module AiSre
       AiSre::CustomerCommunicationService.publish_resolved!(@incident)
 
       # Otomatik Post-Mortem Raporu Üretimi (PostMortem 1.1)
+      @incident.update_ai_stage!("writing_post_mortem", "Hata çözüldü — Gemini Flash ile Post-Mortem analiz raporu yazılıyor...")
       AiSre::PostMortemGenerator.generate!(@incident)
+      @incident.update_ai_stage!("completed", nil)
     end
 
     def handle_plan_creation(res)

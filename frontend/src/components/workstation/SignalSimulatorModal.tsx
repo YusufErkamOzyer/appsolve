@@ -94,13 +94,10 @@ export function SignalSimulatorModal({
         },
       });
 
-      setFeedback("Sinyal iletildi! Gemini AI SRE Triage tamamlandı.");
+      setFeedback("Sinyal iletildi! Jev yapay zeka analizi başlatıldı.");
       await onSignalSent();
-
-      setTimeout(() => {
-        onClose();
-        setFeedback(null);
-      }, 700);
+      onClose();
+      setFeedback(null);
     } catch (err) {
       setFeedback(
         `Hata: ${err instanceof Error ? err.message : "Sinyal gönderilemedi"}`

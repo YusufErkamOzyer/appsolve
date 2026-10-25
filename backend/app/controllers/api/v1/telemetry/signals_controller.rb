@@ -27,13 +27,18 @@ module Api
           end
 
           # Create incident without pre-assigned severity; TypeSafe Jev + Gemini AI Triage determines severity
+          initial_payload = raw_payload.except("severity", :severity).merge(
+            "ai_stage" => "jev_categorizing",
+            "ai_status_text" => "Hata inceleniyor — TypeSafe Jev (System One) ile kategorize ediliyor..."
+          )
+
           incident = Incident.create!(
             service: service,
             title: "#{error_code}: #{message.truncate(80)}",
             severity: nil,
             status: "investigating",
             autonomy_mode: "pending_triage",
-            raw_payload: raw_payload.except("severity", :severity)
+            raw_payload: initial_payload
           )
 
           # Update service last incident timestamp
@@ -48,9 +53,27 @@ module Api
           )
 
           # AI SRE Triage & Guardrail Motorunu çalıştır veya Token Tasarrufu Modunda atla
+          is_staged_run = params[:staged] == true || params[:async] == true || (!Rails.env.test? && params[:sync] != true)
+
           if AiSre::AutomationConfig.ai_connected?
-            AiSre::TriageService.call(incident)
-            triage_message = "Telemetri sinyali başarıyla işlendi ve AI Triage tamamlandı."
+            incident_id = incident.id
+            if !Rails.env.test? && is_staged_run
+              # Canlı ortam: Asenkron arka plan iş parçacığıyla aşamalı ilerle
+              Thread.new do
+                Rails.application.executor.wrap do
+                  AiSre::TriageService.call_staged(incident_id)
+                end
+              end
+              triage_message = "Telemetri sinyali başarıyla alındı ve canlı aşamalı AI triyaj süreci başlatıldı."
+            elsif is_staged_run
+              # Test ortamında staged talep edildiyse senkron çalıştır
+              AiSre::TriageService.call_staged(incident_id)
+              triage_message = "Telemetri sinyali başarıyla alındı ve aşamalı AI triyaj tamamlandı."
+            else
+              # Standart test modu
+              AiSre::TriageService.call(incident)
+              triage_message = "Telemetri sinyali başarıyla işlendi ve AI Triage tamamlandı."
+            end
           else
             handle_disconnected_ai(incident, service, error_code, message)
             triage_message = "AI bağlantısı kesik olduğu için sinyal token harcanmadan kaydedildi (Token Tasarrufu Modu)."
@@ -69,6 +92,9 @@ module Api
               title: incident.title,
               severity: params[:severity].presence || incident.severity,
               normalized_severity: incident.severity,
+              ai_stage: incident.ai_stage,
+              ai_status_text: incident.ai_status_text,
+              jev_triage: incident.raw_payload&.dig("jev_triage"),
               raw_payload: incident.raw_payload,
               status: incident.status,
               autonomy_mode: incident.autonomy_mode,

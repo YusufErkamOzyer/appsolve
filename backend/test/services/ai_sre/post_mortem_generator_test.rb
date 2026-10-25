@@ -33,7 +33,8 @@ class PostMortemGeneratorTest < ActiveSupport::TestCase
     assert pm.duration_seconds >= 120
     assert_includes pm.mttr_formatted, "dk"
     assert_not_empty pm.action_items
-    assert_equal "@solver (AI SRE Ajanı)", pm.generated_by
+    assert_includes pm.generated_by, "@solver"
+    assert_includes pm.generated_by, "gemini-3.8-flash"
 
     # IncidentEvent created
     event = incident.incident_events.find_by(event_type: "post_mortem_generated")
@@ -91,5 +92,48 @@ class PostMortemGeneratorTest < ActiveSupport::TestCase
     assert_includes pm.mttr_formatted, "sn"
     assert_includes pm.affected_services.first, "Katalog"
     assert_not_empty pm.action_items
+  end
+
+  test "generate_post_mortem uses gemini-3.8-flash and fails over to gemini-3.6-flash when quota exhausted" do
+    old_mock = ENV["MOCK_AI"]
+    ENV["MOCK_AI"] = "false"
+
+    incident = Incident.create!(
+      service: @checkout,
+      title: "Checkout Outage for Quota Failover",
+      severity: "SEV-1",
+      status: "resolved",
+      autonomy_mode: "manual_command_only",
+      escalation_target: "on_call_and_team_lead",
+      created_at: 10.seconds.ago,
+      resolved_at: Time.current
+    )
+
+    client = AiSre::GeminiClient.new(api_key: "dummy_key", model: "antigravity-preview-latest")
+
+    # Simulate 3.8 hitting HTTP 429 quota exhaustion, and 3.6 succeeding
+    attempted_models = []
+    client.define_singleton_method(:call_standard_generate_content_api) do |system_instruction:, user_prompt:, response_schema:, model: nil, timeout: 35|
+      attempted_models << model
+      if model == "gemini-3.8-flash"
+        raise "Gemini API HTTP 429: Resource has been exhausted (quota limit reached)"
+      else
+        {
+          summary: "Başarıyla üretilen rapor.",
+          root_cause: "Kök neden açıklaması.",
+          affected_services: ["Ödeme (checkout)"],
+          action_items: ["Eşik kuralını güncelle"]
+        }.with_indifferent_access
+      end
+    end
+
+    begin
+      res = client.generate_post_mortem(incident: incident)
+      assert_equal ["gemini-3.8-flash", "gemini-3.6-flash"], attempted_models
+      assert_equal "gemini-3.6-flash", res[:used_model]
+      assert_not_equal "antigravity-preview-latest", res[:used_model]
+    ensure
+      ENV["MOCK_AI"] = old_mock
+    end
   end
 end

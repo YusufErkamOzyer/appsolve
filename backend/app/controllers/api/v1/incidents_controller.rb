@@ -23,12 +23,14 @@ module Api
         approved_by = params[:approved_by] || "Nöbetçi Mühendis (On-Call SRE)"
         plan_id = params[:plan_id]
         message_id = params[:message_id]
+        is_staged = params[:staged] == true || (!Rails.env.test? && params[:sync] != true)
 
         AiSre::RemediationService.approve_plan!(
           incident,
           approved_by: approved_by,
           plan_id: plan_id,
-          message_id: message_id
+          message_id: message_id,
+          staged: is_staged
         )
 
         render json: {
@@ -158,6 +160,9 @@ module Api
           status: inc.status,
           autonomy_mode: inc.autonomy_mode,
           escalation_target: inc.escalation_target,
+          ai_stage: inc.ai_stage,
+          ai_status_text: inc.ai_status_text,
+          jev_triage: inc.raw_payload&.dig("jev_triage"),
           hypothesis: inc.hypothesis,
           reasoning: inc.reasoning,
           recommended_action_plan: inc.recommended_action_plan,

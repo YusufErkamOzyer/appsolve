@@ -54,7 +54,18 @@ export default function CommandWorkstationPage() {
     }
   }, []);
 
-  // 1500ms Visibility-Aware Reactive Polling Loop
+  const isAnyAiActive = useMemo(
+    () =>
+      incidents.some(
+        (i) =>
+          i.ai_stage &&
+          i.ai_stage !== "completed" &&
+          i.ai_stage !== "awaiting_approval"
+      ),
+    [incidents]
+  );
+
+  // Adaptive Visibility-Aware Reactive Polling Loop (750ms when AI stage is active, 1500ms idle)
   useEffect(() => {
     const runSync = async () => {
       await loadData();
@@ -62,11 +73,12 @@ export default function CommandWorkstationPage() {
 
     void runSync();
 
+    const pollIntervalMs = isAnyAiActive ? 750 : 1500;
     const interval = setInterval(() => {
       if (typeof document !== "undefined" && document.visibilityState === "visible") {
         void runSync();
       }
-    }, 1500);
+    }, pollIntervalMs);
 
     const handleVisibilityOrFocus = () => {
       if (typeof document !== "undefined" && document.visibilityState === "visible") {
@@ -82,7 +94,7 @@ export default function CommandWorkstationPage() {
       window.removeEventListener("focus", handleVisibilityOrFocus);
       document.removeEventListener("visibilitychange", handleVisibilityOrFocus);
     };
-  }, [loadData]);
+  }, [loadData, isAnyAiActive]);
 
   const activeIncidents = useMemo(
     () => incidents.filter((i) => i.status !== "resolved"),
